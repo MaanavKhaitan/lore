@@ -74,9 +74,10 @@ def relation(*, max_per_target: int | None = None, severity: Severity = "reject"
 
     ``max_per_target=1`` means "a given target may be pointed to by at most one
     subject via this relation" — OWL calls this *inverse-functional*. (Plain
-    OWL-functional, "at most one object per subject", is automatic here because
-    scalar relation fields hold a single id.) The explicit kwarg avoids the
-    jargon trap.
+    OWL-functional, "at most one object per subject", holds for every relation
+    field: values are scalar ids, and the ``single_value`` check rejects
+    re-asserting a committed subject with a different target.) The explicit
+    kwarg avoids the jargon trap.
     """
     return pydantic.Field(
         json_schema_extra={

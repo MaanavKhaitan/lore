@@ -63,12 +63,13 @@ class Graph:
         for field_name, rel in compiled.relations.items():
             edges = self._view.edges_from(node_id, rel.predicate)
             if edges:
-                kwargs[field_name] = edges[0].object_id
+                # Newest value wins: staged facts follow committed ones in view
+                # order, so a proposal under check hydrates with its own values.
+                kwargs[field_name] = edges[-1].object_id
         for field_name, attr in compiled.attributes.items():
             for fact in self._view.attrs(attr.attr):
                 if fact.subject_id == node_id:
-                    kwargs[field_name] = fact.value
-                    break
+                    kwargs[field_name] = fact.value  # no break: newest value wins
         return compiled.cls(**kwargs)
 
     def incoming(self, node_id: str, predicate: str) -> list[EdgeFact]:
@@ -90,6 +91,13 @@ def _staged_edge_keys(staged: list[Fact]) -> set[tuple[str, str, str]]:
 
 def _staged_typed_nodes(staged: list[Fact]) -> set[str]:
     return {f.node_id for f in staged if isinstance(f, TypeFact)}
+
+
+def _staged_subject_ids(staged: list[Fact]) -> set[str]:
+    """Every node a staged fact directly asserts something about — includes
+    committed nodes whose fields a proposal re-asserts (their TypeFacts dedupe
+    away, so ``_staged_typed_nodes`` alone would miss them)."""
+    return {f.node_id if isinstance(f, TypeFact) else f.subject_id for f in staged}
 
 
 def _an(noun: str) -> str:
@@ -221,6 +229,67 @@ def check_max_per_target(guard: "Guard", view: FactStore, staged: list[Fact]) ->
     return out
 
 
+def check_single_value(guard: "Guard", view: FactStore, staged: list[Fact]) -> list[Violation]:
+    """Every field is scalar: a node holds at most one value per relation and
+    per attribute, and committed values are immutable. Fires when a proposal
+    re-asserts a committed entity id with a changed value, or asserts two
+    values for one id in a single proposal. For relation fields this is what
+    enforces OWL-functional ("at most one object per subject") across turns.
+    """
+    staged_edges = _staged_edge_keys(staged)
+    staged_attrs = [(f.subject_id, f.attr, f.value) for f in staged if isinstance(f, AttrFact)]
+    out = []
+    for predicate, spec in guard.relations.items():
+        by_subject: dict[str, list[EdgeFact]] = {}
+        for edge in view.edges(predicate):
+            by_subject.setdefault(edge.subject_id, []).append(edge)
+        for subject_id, edges in by_subject.items():
+            if len(edges) <= 1 or not any(_edge_key(e) in staged_edges for e in edges):
+                continue
+            prior = sorted(e.object_id for e in edges if _edge_key(e) not in staged_edges)
+            proposed = sorted(e.object_id for e in edges if _edge_key(e) in staged_edges)
+            listing = ", ".join(
+                [f"{o} (already committed)" for o in prior] + [f"{o} (proposed)" for o in proposed]
+            )
+            article = _an(spec.owner)
+            out.append(
+                Violation(
+                    check="single_value",
+                    severity=spec.severity,
+                    message=(
+                        f"{article[0].upper()}{article[1:]} can point at only one "
+                        f"{spec.target} via '{spec.field}', but {subject_id} points at "
+                        f"{len(edges)}: {listing}."
+                    ),
+                    subjects=(subject_id, *sorted(e.object_id for e in edges)),
+                )
+            )
+    for attr, spec in guard.attributes.items():
+        by_node: dict[str, list[AttrFact]] = {}
+        for fact in view.attrs(attr):
+            by_node.setdefault(fact.subject_id, []).append(fact)
+        for subject_id, facts in by_node.items():
+            staged_mask = [(f.subject_id, f.attr, f.value) in staged_attrs for f in facts]
+            if len(facts) <= 1 or not any(staged_mask):
+                continue
+            listing = ", ".join(
+                [f"{f.value!r} (already committed)" for f, s in zip(facts, staged_mask) if not s]
+                + [f"{f.value!r} (proposed)" for f, s in zip(facts, staged_mask) if s]
+            )
+            out.append(
+                Violation(
+                    check="single_value",
+                    severity=spec.severity,
+                    message=(
+                        f"{attr} can hold only one value, but {subject_id} has "
+                        f"{len(facts)}: {listing}."
+                    ),
+                    subjects=(subject_id,),
+                )
+            )
+    return out
+
+
 def check_one_of(guard: "Guard", view: FactStore, staged: list[Fact]) -> list[Violation]:
     """Staged attribute values must be in the field's allowed set."""
     out = []
@@ -265,11 +334,13 @@ def check_disjoint(guard: "Guard", view: FactStore, staged: list[Fact]) -> list[
 
 
 def check_rules(guard: "Guard", view: FactStore, staged: list[Fact]) -> list[Violation]:
-    """Run ``@ont.rule`` predicates for every staged node typed with (a subclass
-    of) the rule's target class."""
+    """Run ``@ont.rule`` predicates for every node a staged fact touches (not
+    just newly typed nodes: re-asserting a committed id with changed fields
+    must re-run its rules) that is typed with (a subclass of) the rule's
+    target class."""
     graph = Graph(guard, view)
     out = []
-    for node_id in sorted(_staged_typed_nodes(staged)):
+    for node_id in sorted(_staged_subject_ids(staged)):
         types = view.types_of(node_id)
         for rule in guard.rules:
             if rule.target not in types:
@@ -293,6 +364,7 @@ ALL_CHECKS = (
     check_range,
     check_domain,
     check_max_per_target,
+    check_single_value,
     check_one_of,
     check_disjoint,
     check_rules,

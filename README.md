@@ -113,9 +113,9 @@ validate → explain → retry → pass loop offline with a scripted model.
    constraints), edge facts for relations, attribute facts for scalars.
    Deterministic; no LLM anywhere.
 2. **Check** — facts are staged in an overlay, never written directly. All
-   checks (existence, domain/range, max_per_target, one_of, disjoint, rules)
-   scan committed ∪ staged; only violations involving staged facts are
-   reported.
+   checks (existence, domain/range, max_per_target, single_value, one_of,
+   disjoint, rules) scan committed ∪ staged; only violations involving staged
+   facts are reported.
 3. **Verdict** — violations carry severity (`reject` blocks commit, `flag`
    commits but is surfaced) and render as concrete, id-naming English.
 4. **Repair** — `verdict.ok` gates `session.commit()`; otherwise
@@ -125,11 +125,13 @@ validate → explain → retry → pass loop offline with a scripted model.
 
 Sessions are transactional (propose → check → commit), closed-world over
 their seed plus committed facts, and single-threaded by design: one session
-per agent run.
+per agent run. Committed facts are immutable: re-asserting an entity id with
+changed values is itself a violation (`single_value`), never a silent update —
+so an agent can't dodge "refund at most once" by reusing an old refund's id.
 
 ## Status & roadmap
 
-Milestone 1 (this): schema DSL, grounding, in-memory store, 5 axiom checks +
+Milestone 1 (this): schema DSL, grounding, in-memory store, 6 axiom checks +
 rule escape hatch, verdicts/repair prompts, Pydantic AI adapter, commerce
 example. ~1,000 lines, tested (table-driven per-axiom cases + property tests).
 

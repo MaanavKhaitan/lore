@@ -277,9 +277,9 @@ Split a file only past ~500 lines.
 
 ### Milestones
 1. **Vertical slice** — ✅ implemented 2026-08-23: schema DSL + ground + InMemoryStore +
-   5 checks (existence, domain/range, max_per_target, one_of, disjoint) + `@ont.rule`
-   escape hatch + Verdict/repair prompts + Pydantic AI adapter + refund demo + tests.
-   No inference yet. Demos the double-refund catch (`examples/commerce/`).
+   6 checks (existence, domain/range, max_per_target, single_value, one_of, disjoint) +
+   `@ont.rule` escape hatch + Verdict/repair prompts + Pydantic AI adapter + refund demo
+   + tests. No inference yet. Demos the double-refund catch (`examples/commerce/`).
 2. Inference (transitive/inverse/subclass) + provenance explanations.
 3. Severity/shadow mode polish, session seeding, (maybe) SHACL export + differential CI.
 4. **The benchmark** (see §9 — for a personal project this jumps in priority), MCP
@@ -291,8 +291,10 @@ Commerce ontology: `Customer`, `SupportRep` (disjoint w/ Customer), `Order`
 (status one_of paid/shipped/refunded, `placed_by: Relation[Customer]`), `Refund`
 (`refunds: Relation[Order] = relation(max_per_target=1)`, `paid_to: Relation[Customer]`).
 (Correction vs the original sketch's `functional=True`: OWL-functional means ≤1 *object
-per subject* — automatic for a scalar field; refund-once is ≤1 *subject per object*, OWL
-*inverse*-functional, spelled `max_per_target=1` to avoid the jargon trap.)
+per subject* — scalar fields hold one value, enforced cross-turn by the `single_value`
+check (committed values are immutable, so re-asserting a committed id with a different
+target is rejected); refund-once is ≤1 *subject per object*, OWL *inverse*-functional,
+spelled `max_per_target=1` to avoid the jargon trap.)
 Agent tool `issue_refund` → `session.propose(Refund(...))` → verdict catches: second
 refund on same order (max_per_target, cross-turn), payout to a SupportRep (range +
 disjoint), refund of nonexistent order (existence). Violation message style (modeled on

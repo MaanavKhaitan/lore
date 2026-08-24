@@ -141,6 +141,31 @@ CASES = [
         False,
     ),
     ("rule-pass", [], [refund("ref_a", amount=50.0)], set(), True),
+    (
+        # Committed values are immutable: changing ref_a's amount is a
+        # single_value violation, and rules re-run against the proposed value.
+        "single-value-attr-change-on-committed",
+        [[refund("ref_a", amount=50.0)]],
+        [refund("ref_a", amount=250.0)],
+        {("single_value", ("ref_a",)), ("rule:refund_within_total", ("ref_a",))},
+        False,
+    ),
+    (
+        # Retargeting a committed refund at a second order would let one refund
+        # pay out against two orders — scalar relations stay functional cross-turn.
+        "single-value-edge-retarget-on-committed",
+        [[refund("ref_a")]],
+        [refund("ref_a", refunds="ord_2")],
+        {("single_value", ("ref_a", "ord_1", "ord_2"))},
+        False,
+    ),
+    (
+        "single-value-same-proposal-id-collision",
+        [],
+        [refund("ref_a", amount=10.0), refund("ref_a", amount=20.0)],
+        {("single_value", ("ref_a",))},
+        False,
+    ),
 ]
 
 
@@ -159,6 +184,35 @@ def test_max_per_target_message_names_prior_committed_subject():
     assert "ord_1" in violation.message
     assert "ref_a (already committed)" in violation.message
     assert "ref_b (proposed)" in violation.message
+
+
+def test_single_value_message_names_committed_and_proposed_values():
+    session = make_session(committed=[[refund("ref_a", amount=50.0)]])
+    verdict = session.propose(refund("ref_a", amount=250.0))
+    [violation] = [v for v in verdict.violations if v.check == "single_value"]
+    assert "Refund.amount" in violation.message
+    assert "50.0 (already committed)" in violation.message
+    assert "250.0 (proposed)" in violation.message
+
+
+def test_rules_rerun_when_staged_facts_touch_committed_nodes():
+    # Setting a previously-unset field on a committed entity stages no TypeFact
+    # (those dedupe away), but the entity's rules must still re-run.
+    ont2 = Ontology("rerun-test")
+
+    @ont2.entity
+    class Doc(Entity):
+        state: str | None = None
+
+    @ont2.rule(message="Doc {obj.id} may not be archived.")
+    def not_archived(doc: Doc, graph) -> bool:
+        return doc.state != "archived"
+
+    session = ont2.compile().session()
+    assert session.propose(Doc(id="d1")).ok
+    session.commit()
+    verdict = session.propose(Doc(id="d1", state="archived"))
+    assert {(v.check, v.subjects) for v in verdict.violations} == {("rule:not_archived", ("d1",))}
 
 
 def test_flag_severity_lands_in_flags_not_rejects():
