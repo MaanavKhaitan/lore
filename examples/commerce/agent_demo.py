@@ -1,7 +1,7 @@
 """The full validate → explain → retry → pass loop, offline.
 
 A scripted pydantic_ai FunctionModel plays the agent: its first output is a
-double refund, the ontology rejects it with a repair prompt, and its retry is
+double refund, the lore rejects it with a repair prompt, and its retry is
 valid. No API key needed; the run is fully deterministic.
 
 Run:  python examples/commerce/agent_demo.py
@@ -19,11 +19,11 @@ try:
     )
     from pydantic_ai.models.function import AgentInfo, FunctionModel
 except ImportError:
-    sys.exit("this demo needs pydantic_ai: pip install 'ontic[pydantic-ai]'")
+    sys.exit("this demo needs pydantic_ai: pip install 'lore[pydantic-ai]'")
 
-from ontology import Customer, Order, Refund, SupportRep, guard
+from world import Customer, Order, Refund, SupportRep, guard
 
-from ontic.adapters.pydantic_ai import validate_output
+from lore.adapters.pydantic_ai import validate_output
 
 session = guard.session(
     seed=[
@@ -54,7 +54,7 @@ agent = Agent(FunctionModel(scripted_model), output_type=Refund)
 
 
 @agent.output_validator
-def check_against_ontology(output: Refund) -> Refund:
+def check_against_lore(output: Refund) -> Refund:
     return validate_output(session, output)
 
 
@@ -68,7 +68,7 @@ for message in result.all_messages():
         elif isinstance(part, ToolCallPart):
             print(f"[agent output]    {part.args}")
         elif isinstance(part, RetryPromptPart):
-            print("[ontic repair]")
+            print("[lore repair]")
             for line in part.content.splitlines():
                 print(f"                  {line}")
 

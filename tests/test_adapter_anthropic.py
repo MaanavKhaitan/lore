@@ -2,24 +2,24 @@
 
 import json
 
-from ontic import Entity, Ontology, OntologyViolation, Relation, relation
-from ontic.adapters.anthropic import guard_tool, violation_result
-from ontic.store import TypeFact
+from lore import Entity, Lore, LoreViolation, Relation, relation
+from lore.adapters.anthropic import guard_tool, violation_result
+from lore.store import TypeFact
 
-ont = Ontology("anthropic-adapter-test")
+lore = Lore("anthropic-adapter-test")
 
 
-@ont.entity
+@lore.entity
 class Order(Entity):
     pass
 
 
-@ont.entity
+@lore.entity
 class Refund(Entity):
     refunds: Relation[Order] = relation(max_per_target=1)
 
 
-guard = ont.compile()
+guard = lore.compile()
 
 
 def make_session():
@@ -84,7 +84,7 @@ def test_violation_result_shape():
     try:
         with session.guarded(Refund(id="ref_2", refunds="ord_1")):
             pass
-    except OntologyViolation as err:
+    except LoreViolation as err:
         caught = err
     assert caught is not None
     assert violation_result("toolu_123", caught) == {

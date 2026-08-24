@@ -3,24 +3,24 @@
 
 import pytest
 
-from ontic import Entity, Ontology, OntologyError, OntologyViolation, Relation, one_of
-from ontic.store import EdgeFact, TypeFact
+from lore import Entity, Lore, LoreError, LoreViolation, Relation, one_of
+from lore.store import EdgeFact, TypeFact
 
-ont = Ontology("session-test")
+lore = Lore("session-test")
 
 
-@ont.entity
+@lore.entity
 class Target(Entity):
     pass
 
 
-@ont.entity
+@lore.entity
 class Item(Entity):
     name: str
     linked: Relation[Target] | None = None
 
 
-guard = ont.compile()
+guard = lore.compile()
 
 
 def test_propose_commit_lifecycle():
@@ -64,17 +64,17 @@ def test_retry_pollution_next_propose_discards_bad_attempt():
 def test_commit_on_failed_verdict_raises():
     session = guard.session(seed=[Target(id="t1")])
     session.propose(Item(id="bad", name="broken", linked="ghost"))
-    with pytest.raises(OntologyError, match="reject-severity violation"):
+    with pytest.raises(LoreError, match="reject-severity violation"):
         session.commit()
 
 
 def test_commit_with_nothing_staged_raises():
     session = guard.session()
-    with pytest.raises(OntologyError, match="nothing to commit"):
+    with pytest.raises(LoreError, match="nothing to commit"):
         session.commit()
     session.propose(Item(id="i1", name="widget"))
     session.commit()
-    with pytest.raises(OntologyError, match="nothing to commit"):
+    with pytest.raises(LoreError, match="nothing to commit"):
         session.commit()
 
 
@@ -111,7 +111,7 @@ def test_proposing_unregistered_entity_raises():
         pass
 
     session = guard.session()
-    with pytest.raises(OntologyError, match="not registered"):
+    with pytest.raises(LoreError, match="not registered"):
         session.propose(Rogue(id="r1"))
 
 
@@ -173,7 +173,7 @@ def test_guarded_runs_body_then_commits():
 def test_guarded_raises_before_body_on_reject():
     session = guard.session(seed=[Target(id="t1")])
     before = session.facts
-    with pytest.raises(OntologyViolation) as excinfo:
+    with pytest.raises(LoreViolation) as excinfo:
         with session.guarded(Item(id="bad", name="broken", linked="ghost")):
             raise AssertionError("body must not run")
     err = excinfo.value
@@ -194,14 +194,14 @@ def test_guarded_rolls_back_when_body_raises():
 def test_guarded_forbids_session_calls_in_the_body():
     session = guard.session(seed=[Target(id="t1")])
     before = session.facts
-    with pytest.raises(OntologyError, match="guarded"):
+    with pytest.raises(LoreError, match="guarded"):
         with session.guarded(Item(id="i1", name="widget", linked="t1")):
             session.propose(Item(id="i2", name="sneaky"))
     assert session.facts == before and session.staged_facts == ()
 
 
 def test_guarded_yields_flag_violations_and_still_commits():
-    flag_ont = Ontology("flag-test")
+    flag_ont = Lore("flag-test")
 
     @flag_ont.entity
     class Note(Entity):

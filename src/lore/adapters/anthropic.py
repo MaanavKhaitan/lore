@@ -1,4 +1,4 @@
-"""Anthropic tool-use adapter: guard a tool function with an ontic session.
+"""Anthropic tool-use adapter: guard a tool function with a lore session.
 
 Nothing here imports the anthropic SDK — the helpers only produce the
 ``(content, is_error)`` and ``tool_result`` shapes a Messages-API tool loop
@@ -13,7 +13,7 @@ from typing import Any, Callable, Sequence
 
 from ..schema import Entity
 from ..session import Session
-from ..verdict import OntologyViolation
+from ..verdict import LoreViolation
 
 ToolResult = tuple[str, bool]  # (content, is_error) for a tool_result block
 
@@ -52,7 +52,7 @@ def guard_tool(session: Session) -> Callable[[Callable[..., Any]], Callable[...,
             try:
                 with session.guarded(*objs):
                     content = payload() if callable(payload) else payload
-            except OntologyViolation as err:
+            except LoreViolation as err:
                 return err.repair_prompt, True
             return content if isinstance(content, str) else json.dumps(content), False
 
@@ -61,9 +61,9 @@ def guard_tool(session: Session) -> Callable[[Callable[..., Any]], Callable[...,
     return decorate
 
 
-def violation_result(tool_use_id: str, err: OntologyViolation) -> dict[str, Any]:
+def violation_result(tool_use_id: str, err: LoreViolation) -> dict[str, Any]:
     """A ``tool_result`` content block carrying the repair prompt as an error —
-    for loops that catch :class:`OntologyViolation` themselves."""
+    for loops that catch :class:`LoreViolation` themselves."""
     return {
         "type": "tool_result",
         "tool_use_id": tool_use_id,

@@ -3,26 +3,26 @@
 from hypothesis import given
 from hypothesis import strategies as st
 
-from ontic import Entity, Ontology, Relation, relation
-from ontic.engine import Graph, ground
-from ontic.store import InMemoryStore
+from lore import Entity, Lore, Relation, relation
+from lore.engine import Graph, ground
+from lore.store import InMemoryStore
 
 # --- (a) max_per_target=1 fires exactly once iff more than one subject --------
 
-ont_a = Ontology("prop-max")
+lore_a = Lore("prop-max")
 
 
-@ont_a.entity
+@lore_a.entity
 class Order(Entity):
     pass
 
 
-@ont_a.entity
+@lore_a.entity
 class Refund(Entity):
     refunds: Relation[Order] = relation(max_per_target=1)
 
 
-guard_a = ont_a.compile()
+guard_a = lore_a.compile()
 
 refund_ids = st.lists(
     st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789", min_size=1, max_size=8),
@@ -47,15 +47,15 @@ def test_max_per_target_fires_exactly_once_iff_multiple_subjects(ids):
 
 # --- (b) ground → hydrate round-trips field values ----------------------------
 
-ont_b = Ontology("prop-roundtrip")
+lore_b = Lore("prop-roundtrip")
 
 
-@ont_b.entity
+@lore_b.entity
 class Other(Entity):
     pass
 
 
-@ont_b.entity
+@lore_b.entity
 class Thing(Entity):
     name: str
     count: int
@@ -63,7 +63,7 @@ class Thing(Entity):
     linked: Relation[Other] | None = None
 
 
-guard_b = ont_b.compile()
+guard_b = lore_b.compile()
 
 things = st.builds(
     Thing,

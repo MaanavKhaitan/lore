@@ -57,7 +57,7 @@ class Verdict:
         return "\n".join(lines)
 
 
-class OntologyViolation(Exception):
+class LoreViolation(Exception):
     """A proposal drew reject-severity violations.
 
     Raised by ``Session.guarded()``. This is the catch-and-convert seam for

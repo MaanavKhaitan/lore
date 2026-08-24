@@ -1,6 +1,6 @@
-"""Ontology self-check and the compiled ``Guard``.
+"""Lore self-check and the compiled ``Guard``.
 
-``compile()`` is where broken ontologies fail loudly (Pydantic-style, at
+``compile()`` is where broken lore fails loudly (Pydantic-style, at
 import/startup time): unknown relation targets, unresolvable forward refs,
 impossible disjointness, empty ``one_of``, nonsensical cardinalities. What
 survives is a ``Guard``: an immutable bundle of class registry, relation/attr
@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Callable, Iterable, Union
 from pydantic.fields import FieldInfo
 
 from .engine import _an
-from .schema import Entity, Ontology, OntologyError, Severity, _RawRule, _RelTarget
+from .schema import Entity, Lore, LoreError, Severity, _RawRule, _RelTarget
 
 if TYPE_CHECKING:
     from .session import Session
@@ -61,7 +61,7 @@ class CompiledClass:
 
 
 class Guard:
-    """A compiled, validated ontology. Create sessions from it."""
+    """A compiled, validated lore. Create sessions from it."""
 
     def __init__(
         self,
@@ -86,7 +86,7 @@ class Guard:
         return Session(self, seed=seed)
 
     def to_context(self) -> str:
-        """Render the ontology as plain English for a system prompt.
+        """Render the lore as plain English for a system prompt.
 
         Prevention to the session's detection: paste this into the agent's
         prompt so it knows the rules before violating them (and so
@@ -143,12 +143,12 @@ def _advisory(severity: Severity) -> str:
     return " (advisory: flagged, not rejected)" if severity == "flag" else ""
 
 
-def _ontic_extra(info: FieldInfo) -> dict[str, Any]:
+def _lore_extra(info: FieldInfo) -> dict[str, Any]:
     extra = info.json_schema_extra
     if isinstance(extra, dict):
-        ontic = extra.get("ontic")
-        if isinstance(ontic, dict):
-            return ontic
+        lore = extra.get("lore")
+        if isinstance(lore, dict):
+            return lore
     return {}
 
 
@@ -186,37 +186,37 @@ def _defining_class(cls: type[Entity], field_name: str, registry: dict[str, type
 def _resolve_target(target: type[Entity] | str, registry: dict[str, type[Entity]], where: str) -> str:
     if isinstance(target, str):
         if target not in registry:
-            raise OntologyError(
+            raise LoreError(
                 f"{where}: relation target {target!r} is not a registered entity class"
             )
         return target
     registered = registry.get(target.__name__)
     if registered is not target:
-        raise OntologyError(
+        raise LoreError(
             f"{where}: relation target {target.__name__!r} is not registered with this "
-            "ontology (did you forget @ont.entity?)"
+            "lore (did you forget @lore.entity?)"
         )
     return target.__name__
 
 
 def _check_severity(value: Any, where: str) -> Severity:
     if value not in ("reject", "flag"):
-        raise OntologyError(f"{where}: severity must be 'reject' or 'flag', got {value!r}")
+        raise LoreError(f"{where}: severity must be 'reject' or 'flag', got {value!r}")
     return value
 
 
 def _add_unique(mapping: dict[str, Any], key: str, spec: Any, kind: str) -> None:
     existing = mapping.get(key)
     if existing is not None and existing != spec:
-        raise OntologyError(
+        raise LoreError(
             f"{kind} {key!r} is declared twice with different options "
-            "(a subclass may not redeclare an inherited field with new ontic options)"
+            "(a subclass may not redeclare an inherited field with new lore options)"
         )
     mapping[key] = spec
 
 
-def compile_ontology(ont: Ontology) -> Guard:
-    registry = dict(ont._classes)
+def compile_lore(lore: Lore) -> Guard:
+    registry = dict(lore._classes)
     classes: dict[str, CompiledClass] = {}
     relations: dict[str, RelationSpec] = {}
     attributes: dict[str, AttrSpec] = {}
@@ -230,20 +230,20 @@ def compile_ontology(ont: Ontology) -> Guard:
         for field_name, info in cls.model_fields.items():
             if field_name == "id":
                 continue
-            extra = _ontic_extra(info)
+            extra = _lore_extra(info)
             owner = _defining_class(cls, field_name, registry)
             predicate = f"{owner}.{field_name}"
             severity = _check_severity(extra.get("severity", "reject"), predicate)
             rel = _rel_target_of(info)
             if rel is not None:
                 if extra.get("kind") == "one_of":
-                    raise OntologyError(f"{predicate}: one_of() cannot be used on a relation field")
+                    raise LoreError(f"{predicate}: one_of() cannot be used on a relation field")
                 target_name = _resolve_target(rel.target, registry, predicate)
                 max_per_target = extra.get("max_per_target")
                 if max_per_target is not None and (
                     not isinstance(max_per_target, int) or max_per_target < 1
                 ):
-                    raise OntologyError(
+                    raise LoreError(
                         f"{predicate}: max_per_target must be an int >= 1, got {max_per_target!r}"
                     )
                 spec = RelationSpec(predicate, owner, field_name, target_name, max_per_target, severity)
@@ -251,12 +251,12 @@ def compile_ontology(ont: Ontology) -> Guard:
                 class_relations[field_name] = spec
             else:
                 if extra.get("kind") == "relation":
-                    raise OntologyError(
+                    raise LoreError(
                         f"{predicate}: relation() options on a field without a Relation[...] annotation"
                     )
                 allowed = extra.get("one_of")
                 if allowed is not None and len(allowed) == 0:
-                    raise OntologyError(f"{predicate}: one_of() needs at least one allowed value")
+                    raise LoreError(f"{predicate}: one_of() needs at least one allowed value")
                 spec = AttrSpec(
                     predicate, owner, field_name, tuple(allowed) if allowed else None, severity
                 )
@@ -266,42 +266,42 @@ def compile_ontology(ont: Ontology) -> Guard:
 
     pairs: set[tuple[str, str]] = set()
     for name, cls in registry.items():
-        for other in getattr(cls, "ontic_disjoint_with", ()) or ():
+        for other in getattr(cls, "lore_disjoint_with", ()) or ():
             other_name = other if isinstance(other, str) else other.__name__
             if registry.get(other_name) is None or (
                 not isinstance(other, str) and registry.get(other_name) is not other
             ):
-                raise OntologyError(
-                    f"{name}.ontic_disjoint_with names {other_name!r}, which is not a "
+                raise LoreError(
+                    f"{name}.lore_disjoint_with names {other_name!r}, which is not a "
                     "registered entity class"
                 )
             pairs.add(tuple(sorted((name, other_name))))  # symmetric closure
     for a, b in sorted(pairs):
         if b in classes[a].ancestors or a in classes[b].ancestors:
-            raise OntologyError(
+            raise LoreError(
                 f"{a} is declared disjoint with {b}, but one subclasses the other — "
-                "no instance could ever satisfy this ontology"
+                "no instance could ever satisfy this lore"
             )
 
     rules: list[RuleSpec] = []
-    for raw in ont._rules:
+    for raw in lore._rules:
         target_name = _resolve_rule_target(raw, registry)
         rules.append(RuleSpec(raw.name, raw.fn, raw.message, raw.severity, target_name))
 
-    return Guard(ont.name, classes, relations, attributes, tuple(sorted(pairs)), tuple(rules))
+    return Guard(lore.name, classes, relations, attributes, tuple(sorted(pairs)), tuple(rules))
 
 
 def _resolve_rule_target(raw: _RawRule, registry: dict[str, type[Entity]]) -> str:
     target = raw.target
     if isinstance(target, str):
         if target not in registry:
-            raise OntologyError(
+            raise LoreError(
                 f"rule {raw.name!r} targets {target!r}, which is not a registered entity class"
             )
         return target
     if isinstance(target, type) and registry.get(target.__name__) is target:
         return target.__name__
-    raise OntologyError(
+    raise LoreError(
         f"rule {raw.name!r}: first-parameter annotation {target!r} is not a registered "
         "entity class"
     )

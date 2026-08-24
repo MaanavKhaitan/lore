@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .schema import Entity, OntologyError
+from .schema import Entity, LoreError
 from .store import AttrFact, EdgeFact, Fact, FactStore, Source, TypeFact
 from .verdict import Violation
 
@@ -26,8 +26,8 @@ def ground(guard: "Guard", obj: Entity, source: Source) -> list[Fact]:
     """
     compiled = guard.classes.get(type(obj).__name__)
     if compiled is None or compiled.cls is not type(obj):
-        raise OntologyError(
-            f"{type(obj).__name__} is not registered with ontology {guard.name!r}"
+        raise LoreError(
+            f"{type(obj).__name__} is not registered with lore {guard.name!r}"
         )
     facts: list[Fact] = [TypeFact(obj.id, name, source) for name in compiled.ancestors]
     for field_name, rel in compiled.relations.items():
@@ -56,11 +56,11 @@ def _most_specific(guard: "Guard", type_names: set[str]) -> "CompiledClass | Non
 class Graph:
     """Read-only view of the session graph.
 
-    This is the object handed to ``@ont.rule`` functions and exposed as
-    ``Session.graph`` — import it from ``ontic`` to annotate rule signatures::
+    This is the object handed to ``@lore.rule`` functions and exposed as
+    ``Session.graph`` — import it from ``lore`` to annotate rule signatures::
 
-        @ont.rule(message="...")
-        def my_rule(refund: Refund, graph: ontic.Graph) -> bool: ...
+        @lore.rule(message="...")
+        def my_rule(refund: Refund, graph: lore.Graph) -> bool: ...
     """
 
     def __init__(self, guard: "Guard", view: FactStore) -> None:
@@ -347,7 +347,7 @@ def check_disjoint(guard: "Guard", view: FactStore, staged: list[Fact]) -> list[
 
 
 def check_rules(guard: "Guard", view: FactStore, staged: list[Fact]) -> list[Violation]:
-    """Run ``@ont.rule`` predicates for every node a staged fact touches (not
+    """Run ``@lore.rule`` predicates for every node a staged fact touches (not
     just newly typed nodes: re-asserting a committed id with changed fields
     must re-run its rules) that is typed with (a subclass of) the rule's
     target class."""

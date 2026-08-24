@@ -14,9 +14,9 @@ from typing import Iterable, Iterator
 
 from .compile import Guard
 from .engine import Graph, _most_specific, ground, run_checks
-from .schema import Entity, OntologyError
+from .schema import Entity, LoreError
 from .store import AttrFact, Fact, FactStore, InMemoryStore, LayeredView, TypeFact
-from .verdict import OntologyViolation, Verdict, Violation
+from .verdict import LoreViolation, Verdict, Violation
 
 __all__ = ["Session", "Verdict", "Violation"]
 
@@ -67,10 +67,10 @@ class Session:
         Flag-severity violations are committable; rejects are not.
         """
         if self._staged is None or self._last_verdict is None:
-            raise OntologyError("nothing to commit: call propose() first")
+            raise LoreError("nothing to commit: call propose() first")
         if not self._last_verdict.ok:
             rejects = len(self._last_verdict.rejects)
-            raise OntologyError(
+            raise LoreError(
                 f"cannot commit: the last verdict has {rejects} reject-severity violation(s)"
             )
         self._committed.add(self._staged)
@@ -117,7 +117,7 @@ class Session:
                 ledger.append(entry)   # side effects go here
 
         The ordering guarantee for guarded tool calls: rejects raise
-        :class:`~ontic.verdict.OntologyViolation` *before* the body runs (no
+        :class:`~lore.verdict.LoreViolation` *before* the body runs (no
         side effects from invalid proposals); an exception in the body rolls
         the proposal back (no commit for failed effects); a clean exit
         commits. The yielded verdict exposes flag-severity violations. Don't
@@ -127,7 +127,7 @@ class Session:
         verdict = self.propose(*objs)
         if not verdict.ok:
             self.rollback()
-            raise OntologyViolation(verdict)
+            raise LoreViolation(verdict)
         snapshot = self._staged
         try:
             yield verdict
@@ -136,7 +136,7 @@ class Session:
             raise
         if self._staged is not snapshot:
             self.rollback()
-            raise OntologyError(
+            raise LoreError(
                 "the session was modified inside a guarded() block; "
                 "propose/commit/rollback are not allowed there"
             )

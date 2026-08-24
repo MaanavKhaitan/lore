@@ -1,17 +1,17 @@
 """The validate → explain → retry → pass loop against a real LLM.
 
 A live agent (Anthropic API, manual tool-use loop) works a queue of refund
-requests with ontic checking at two points:
+requests with lore checking at two points:
 
   1. **before a tool call takes effect** — `issue_refund` proposes the Refund
      against the session; a rejection returns the repair prompt as an
      ``is_error`` tool result and nothing is written to the ledger;
   2. **on the final output** — the agent's structured summary is proposed
-     against the session, so a summary that violates the ontology or claims
+     against the session, so a summary that violates the lore or claims
      refunds that were never issued is bounced back with a repair prompt.
 
 The lookup tool plays a deliberately stale "orders DB": it knows nothing about
-refund history or account types. The ontic session (the refunds ledger) does —
+refund history or account types. The lore session (the refunds ledger) does —
 which is the point: the guard deterministically catches what the model cannot
 see in its context, and the repair prompt tells it why.
 
@@ -42,19 +42,19 @@ _load_dotenv()
 try:
     import anthropic
 except ImportError:
-    sys.exit("this demo needs the anthropic SDK: pip install 'ontic[anthropic]'")
+    sys.exit("this demo needs the anthropic SDK: pip install 'lore[anthropic]'")
 
 if not os.environ.get("ANTHROPIC_API_KEY"):
     sys.exit("set ANTHROPIC_API_KEY (env var or repo-root .env) to run this demo")
 
-from ontology import Customer, Order, Refund, SupportRep, guard
+from world import Customer, Order, Refund, SupportRep, guard
 
-from ontic.adapters.anthropic import guard_tool
+from lore.adapters.anthropic import guard_tool
 
 MODEL = "claude-opus-5"
 MAX_TURNS = 15
 
-# The refunds ledger (the ontic session) knows ord_1 was already refunded and
+# The refunds ledger (the lore session) knows ord_1 was already refunded and
 # that rep_1 is a SupportRep. The orders DB below does not — realistic drift
 # between systems, and exactly the gap the deterministic guard closes.
 session = guard.session(
@@ -218,7 +218,7 @@ def check_final_output(report: dict) -> str | None:
 
     Every claimed refund is re-proposed. Claims matching committed facts stage
     nothing; a claim that stages new facts was never actually issued, and a
-    claim that draws violations contradicts the ontology outright.
+    claim that draws violations contradicts the lore outright.
     """
     claims = [
         Refund(
@@ -297,7 +297,7 @@ def main() -> None:
             results = []
             for block in tool_uses:
                 content, is_error = execute_tool(block.name, block.input)
-                label = "[ontic reject]" if is_error and block.name == "issue_refund" else "[tool result] "
+                label = "[lore reject]" if is_error and block.name == "issue_refund" else "[tool result] "
                 print(f"{label} {indented(content).lstrip()}")
                 results.append(
                     {
@@ -315,7 +315,7 @@ def main() -> None:
         print(f"\n[final output] {indented(json.dumps(report, indent=2)).lstrip()}")
         repair = check_final_output(report)
         if repair is not None:
-            print(f"[ontic reject] {indented(repair).lstrip()}\n")
+            print(f"[lore reject] {indented(repair).lstrip()}\n")
             messages.append({"role": "user", "content": repair})
             continue
 

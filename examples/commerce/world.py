@@ -1,33 +1,33 @@
-"""The canonical commerce ontology: customers, orders, refunds — and the axioms
+"""The canonical commerce lore: customers, orders, refunds — and the axioms
 an agent must not violate.
 """
 
-from ontic import Entity, Graph, Ontology, Relation, one_of, relation
+from lore import Entity, Graph, Lore, Relation, one_of, relation
 
-ont = Ontology("commerce")
+lore = Lore("commerce")
 
 
-@ont.entity
+@lore.entity
 class Customer(Entity):
     name: str
 
 
-@ont.entity
+@lore.entity
 class SupportRep(Entity):
     # A payout recipient can never be a support-rep account: an id typed as
     # both Customer and SupportRep is rejected outright.
-    ontic_disjoint_with = [Customer]
+    lore_disjoint_with = [Customer]
     name: str
 
 
-@ont.entity
+@lore.entity
 class Order(Entity):
     status: str = one_of("paid", "shipped", "refunded")
     total: float
     placed_by: Relation[Customer]
 
 
-@ont.entity
+@lore.entity
 class Refund(Entity):
     amount: float
     # max_per_target=1: a given Order may be pointed to by at most one Refund —
@@ -36,11 +36,11 @@ class Refund(Entity):
     paid_to: Relation[Customer]
 
 
-@ont.rule(message="Refund {obj.id} of ${obj.amount} exceeds the total of order {obj.refunds}.")
+@lore.rule(message="Refund {obj.id} of ${obj.amount} exceeds the total of order {obj.refunds}.")
 def refund_within_order_total(refund: Refund, graph: Graph) -> bool:
     """Arbitrary-Python escape hatch: cross-object arithmetic via graph.get()."""
     order = graph.get(refund.refunds)
     return order is None or refund.amount <= order.total
 
 
-guard = ont.compile()
+guard = lore.compile()
