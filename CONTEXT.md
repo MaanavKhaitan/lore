@@ -5,8 +5,9 @@
 > settled design decision (with rationale), the v1 scope, and the open questions.
 > Last updated: 2026-08-24. Status: **Milestone 1 (vertical slice) implemented** —
 > see §5 Milestones; code lives in `src/lore/`, demos in `examples/commerce/`.
-> Name: **`lore`** (chosen 2026-08-24, renamed from the `ontic` placeholder; the
-> `lore` dist name on PyPI is squatted, so the published distribution name is TBD).
+> Name: **`lore`** (chosen 2026-08-24, renamed from the `ontic` placeholder). The
+> `lore` dist name on PyPI is held by Instacart's abandoned ML framework, so the
+> distribution name is **`agent-lore`** (import stays `lore`); not yet published.
 
 ---
 

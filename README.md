@@ -16,7 +16,7 @@ Violations render as natural-language repair prompts fed back to the agent.
 ```
 
 No RDF, no reasoner JVM, no graph database. Runtime dependency: pydantic.
-*(Not on PyPI yet.)*
+*(Not on PyPI yet — will ship as `agent-lore`, imported as `lore`.)*
 
 ## Install
 

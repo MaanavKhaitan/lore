@@ -3,7 +3,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "lore"
+# Distribution name (PyPI); the import package is `lore` (src/lore).
+name = "agent-lore"
 version = "0.1.0"
 description = "Deterministic guardrails for agent outputs — Pydantic validates the shape of one object; lore validates whether your agent's outputs make sense in your world."
 readme = "README.md"
