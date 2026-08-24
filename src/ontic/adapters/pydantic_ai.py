@@ -1,0 +1,34 @@
+"""Pydantic AI adapter: plug a Session into an output validator or tool body."""
+
+from __future__ import annotations
+
+from typing import Sequence, TypeVar
+
+from ..schema import Entity
+from ..session import Session
+
+OutputT = TypeVar("OutputT", bound="Entity | Sequence[Entity]")
+
+
+def validate_output(session: Session, output: OutputT) -> OutputT:
+    """Validate an agent output against the session's ontology.
+
+    Call inside an ``@agent.output_validator`` (or a tool body). If the verdict
+    is ok the proposal is committed and ``output`` is returned; otherwise
+    ``pydantic_ai.ModelRetry`` is raised with the rendered repair prompt (the
+    rejected facts are discarded implicitly by the next propose).
+    """
+    try:
+        from pydantic_ai import ModelRetry
+    except ImportError as exc:  # pragma: no cover - exercised only without the extra
+        raise ImportError(
+            "the pydantic-ai adapter needs pydantic_ai installed: "
+            "pip install 'ontic[pydantic-ai]'"
+        ) from exc
+
+    objs = [output] if isinstance(output, Entity) else list(output)
+    verdict = session.propose(*objs)
+    if verdict.ok:
+        session.commit()
+        return output
+    raise ModelRetry(verdict.repair_prompt())

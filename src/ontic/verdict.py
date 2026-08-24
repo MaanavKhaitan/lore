@@ -1,0 +1,52 @@
+"""Violations and verdicts — the checkable result of a proposal."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from .schema import Severity
+
+
+@dataclass(frozen=True)
+class Violation:
+    check: str  # "max_per_target", "range", "rule:paid_to_buyer", ...
+    severity: Severity
+    message: str  # fully rendered English, names concrete ids
+    subjects: tuple[str, ...] = ()  # node ids involved
+
+
+@dataclass
+class Verdict:
+    """Outcome of one ``Session.propose``. Deterministically ordered and deduped."""
+
+    violations: list[Violation] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        unique = dict.fromkeys(self.violations)
+        self.violations = sorted(unique, key=lambda v: (v.check, v.subjects, v.message))
+
+    @property
+    def ok(self) -> bool:
+        """True iff there are no reject-severity violations (flags are committable)."""
+        return not self.rejects
+
+    @property
+    def rejects(self) -> list[Violation]:
+        return [v for v in self.violations if v.severity == "reject"]
+
+    @property
+    def flags(self) -> list[Violation]:
+        return [v for v in self.violations if v.severity == "flag"]
+
+    def repair_prompt(self) -> str:
+        """Natural-language repair prompt for the agent (reject-severity only)."""
+        rejects = self.rejects
+        if not rejects:
+            return ""
+        lines = [f"Your output violates {len(rejects)} rule(s) of this domain:"]
+        lines += [f"  {i}. {v.message}" for i, v in enumerate(rejects, start=1)]
+        lines.append(
+            "Produce a corrected output that satisfies every rule. If the requested "
+            "action is impossible under these rules, say so instead of retrying it."
+        )
+        return "\n".join(lines)

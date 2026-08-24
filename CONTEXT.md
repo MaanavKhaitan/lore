@@ -3,7 +3,8 @@
 > **Purpose of this doc:** complete context handoff for agents (and humans) joining this
 > project with zero prior knowledge. It captures the idea, the market research, every
 > settled design decision (with rationale), the v1 scope, and the open questions.
-> Last updated: 2026-08-23. Status: **design/brainstorm phase — no code written yet.**
+> Last updated: 2026-08-23. Status: **Milestone 1 (vertical slice) implemented** —
+> see §5 Milestones; code lives in `src/ontic/`, demos in `examples/commerce/`.
 > Working name used throughout: `ontic` (placeholder; final name/PyPI not chosen).
 
 ---
@@ -275,9 +276,10 @@ ontic/
 Split a file only past ~500 lines.
 
 ### Milestones
-1. **Vertical slice**: schema + ground + InMemoryStore + 4 checks (functional, disjoint,
-   domain/range+existence, one_of) + Verdict/templates + Pydantic AI adapter + refund
-   demo. No inference yet. This already demos the double-refund catch.
+1. **Vertical slice** — ✅ implemented 2026-08-23: schema DSL + ground + InMemoryStore +
+   6 checks (existence, domain/range, max_per_target, single_value, one_of, disjoint) +
+   `@ont.rule` escape hatch + Verdict/repair prompts + Pydantic AI adapter + refund demo
+   + tests. No inference yet. Demos the double-refund catch (`examples/commerce/`).
 2. Inference (transitive/inverse/subclass) + provenance explanations.
 3. Severity/shadow mode polish, session seeding, (maybe) SHACL export + differential CI.
 4. **The benchmark** (see §9 — for a personal project this jumps in priority), MCP
@@ -287,9 +289,14 @@ Split a file only past ~500 lines.
 ### Canonical demo (README hero — the double-refund catch)
 Commerce ontology: `Customer`, `SupportRep` (disjoint w/ Customer), `Order`
 (status one_of paid/shipped/refunded, `placed_by: Relation[Customer]`), `Refund`
-(`refunds: Relation[Order]` functional, `paid_to: Relation[Customer]`).
+(`refunds: Relation[Order] = relation(max_per_target=1)`, `paid_to: Relation[Customer]`).
+(Correction vs the original sketch's `functional=True`: OWL-functional means ≤1 *object
+per subject* — scalar fields hold one value, enforced cross-turn by the `single_value`
+check (committed values are immutable, so re-asserting a committed id with a different
+target is rejected); refund-once is ≤1 *subject per object*, OWL *inverse*-functional,
+spelled `max_per_target=1` to avoid the jargon trap.)
 Agent tool `issue_refund` → `session.propose(Refund(...))` → verdict catches: second
-refund on same order (functional, cross-turn), payout to a SupportRep (range +
+refund on same order (max_per_target, cross-turn), payout to a SupportRep (range +
 disjoint), refund of nonexistent order (existence). Violation message style (modeled on
 data.world templates): *"An order can be refunded at most once, but ord_456 already has
 refund ref_88 (committed at step 3). Do not issue another refund; instead explain that
