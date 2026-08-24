@@ -49,6 +49,8 @@ if not os.environ.get("ANTHROPIC_API_KEY"):
 
 from world import Customer, Order, Refund, SupportRep, guard
 
+from lore.adapters.anthropic import guard_tool
+
 MODEL = "claude-opus-5"
 MAX_TURNS = 15
 
@@ -175,6 +177,30 @@ LEDGER: list[dict] = []
 _refund_seq = 0
 
 
+# Check point 1: guard_tool proposes the refund as a hypothetical BEFORE any
+# side effect — the ledger write runs only if the guard passes, and a
+# rejection becomes the (repair_prompt, is_error=True) tool result, zero trace.
+@guard_tool(session)
+def issue_refund(order_id: str, amount: float, payout_account_id: str):
+    global _refund_seq
+    _refund_seq += 1
+    refund = Refund(
+        id=f"ref_{_refund_seq}", amount=amount, refunds=order_id, paid_to=payout_account_id
+    )
+    entry = {
+        "refund_id": refund.id,
+        "order_id": order_id,
+        "amount": amount,
+        "paid_to": payout_account_id,
+    }
+
+    def issued():
+        LEDGER.append(entry)
+        return {"status": "issued", **entry}
+
+    return refund, issued
+
+
 def execute_tool(name: str, args: dict) -> tuple[str, bool]:
     """Run one tool call; returns (content, is_error)."""
     if name == "get_customer_context":
@@ -182,32 +208,8 @@ def execute_tool(name: str, args: dict) -> tuple[str, bool]:
         if record is None:
             return f"no customer with id {args['customer_id']!r}", True
         return json.dumps(record), False
-
     if name == "issue_refund":
-        global _refund_seq
-        _refund_seq += 1
-        refund = Refund(
-            id=f"ref_{_refund_seq}",
-            amount=args["amount"],
-            refunds=args["order_id"],
-            paid_to=args["payout_account_id"],
-        )
-        # Check point 1: the refund is proposed as a hypothetical BEFORE any
-        # side effect. A rejection leaves zero trace and becomes the tool error.
-        verdict = session.propose(refund)
-        if not verdict.ok:
-            session.rollback()
-            return verdict.repair_prompt(), True
-        session.commit()
-        entry = {
-            "refund_id": refund.id,
-            "order_id": args["order_id"],
-            "amount": args["amount"],
-            "paid_to": args["payout_account_id"],
-        }
-        LEDGER.append(entry)
-        return json.dumps({"status": "issued", **entry}), False
-
+        return issue_refund(**args)
     return f"unknown tool {name!r}", True
 
 

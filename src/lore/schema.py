@@ -175,3 +175,9 @@ class Lore:
         from .compile import compile_lore
 
         return compile_lore(self)
+
+    def to_context(self) -> str:
+        """Compile and render the lore as system-prompt English — see
+        :meth:`lore.compile.Guard.to_context` (call that directly if you
+        already hold a compiled guard)."""
+        return self.compile().to_context()

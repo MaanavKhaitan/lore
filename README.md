@@ -29,7 +29,7 @@ pip install -e ".[anthropic]"     # + the live-agent example (Anthropic SDK)
 ## Declare your world
 
 ```python
-from lore import Entity, Lore, Relation, one_of, relation
+from lore import Entity, Graph, Lore, Relation, one_of, relation
 
 lore = Lore("commerce")
 
@@ -55,7 +55,7 @@ class Refund(Entity):
     paid_to: Relation[Customer]
 
 @lore.rule(message="Refund {obj.id} of ${obj.amount} exceeds the total of order {obj.refunds}.")
-def refund_within_order_total(refund: Refund, graph) -> bool:
+def refund_within_order_total(refund: Refund, graph: Graph) -> bool:
     order = graph.get(refund.refunds)          # arbitrary-Python escape hatch
     return order is None or refund.amount <= order.total
 
@@ -90,6 +90,42 @@ of a nonexistent order (`existence`), one id typed as both customer and rep
 (`disjoint`), a bad status (`one_of`) are all caught the same way. Run
 `python examples/commerce/demo.py` to see each verdict — no API key needed.
 
+## Guard a tool call
+
+`propose`/`commit`/`rollback` is the transactional core; three wrappers cover
+the everyday shapes:
+
+```python
+verdict = session.check(refund)        # preflight "can I?" — zero state change
+verdict = session.try_commit(refund)   # commit if ok, roll back otherwise
+
+with session.guarded(refund):          # raises LoreViolation on rejects
+    ledger.append(entry)               # side effects run only if valid;
+                                       # commit happens after they succeed
+```
+
+`guarded()` gets the ordering right by construction: an invalid proposal
+raises *before* the body runs (no side effects), an exception in the body
+rolls the proposal back (no commit for failed effects), and a clean exit
+commits. `LoreViolation` carries the verdict, and `str(exc)` is the
+repair prompt — catch it and feed it back to the model.
+
+To see what the session believes while debugging: `print(session.dump())`
+renders the world grouped by entity (committed vs staged, seeds marked), and
+`session.graph` exposes the same read API rules receive
+(`graph.get(id)`, `graph.incoming(id, "Refund.refunds")`).
+
+## Put the rules in the prompt too
+
+```python
+system_prompt = guard.to_context() + "\n\n" + YOUR_INSTRUCTIONS
+```
+
+`to_context()` renders the lore as deterministic English — entity shapes,
+disjointness, cardinality, and rules — so the same declaration serves
+prevention (the model knows the rules) and detection (violations are caught
+anyway when it ignores them).
+
 ## Close the loop with an agent
 
 The repair prompt plugs straight into retry sockets that already exist.
@@ -107,10 +143,35 @@ The agent emits the double refund, receives the message above, and corrects
 itself — `python examples/commerce/agent_demo.py` runs the whole
 validate → explain → retry → pass loop offline with a scripted model.
 
-### Against a real model
+### Anthropic tool-use loops
 
-`examples/commerce/live_agent.py` runs the same loop against a live Anthropic
-agent, with the guard at both check points of a tool-use loop:
+For hand-rolled Messages-API loops, `guard_tool` wraps a tool function so its
+returned entity is proposed before anything takes effect — a rejection becomes
+the `(repair_prompt, is_error=True)` tool result the loop feeds back:
+
+```python
+from lore.adapters.anthropic import guard_tool
+
+@guard_tool(session)
+def issue_refund(order_id: str, amount: float, payout_account_id: str):
+    refund = Refund(id=next_id(), amount=amount, refunds=order_id,
+                    paid_to=payout_account_id)
+    entry = {"refund_id": refund.id, "order_id": order_id, "amount": amount}
+
+    def issued():                        # runs only if the guard passes
+        LEDGER.append(entry)
+        return {"status": "issued", **entry}
+
+    return refund, issued
+
+content, is_error = issue_refund(**tool_use.input)   # → tool_result block
+```
+
+(The adapter never imports the anthropic SDK — it only produces the result
+shapes the loop needs, so it works with any hand-rolled loop.)
+
+`examples/commerce/live_agent.py` runs this against a live Anthropic agent,
+with the guard at both check points of a tool-use loop:
 
 - **before a tool call executes** — each `issue_refund` call is proposed
   against the session first; a rejection returns the repair prompt as an
@@ -156,8 +217,10 @@ so an agent can't dodge "refund at most once" by reusing an old refund's id.
 ## Status & roadmap
 
 Milestone 1 (this): schema DSL, grounding, in-memory store, 6 axiom checks +
-rule escape hatch, verdicts/repair prompts, Pydantic AI adapter, commerce
-example. ~1,000 lines, tested (table-driven per-axiom cases + property tests).
+rule escape hatch, verdicts/repair prompts, Pydantic AI + Anthropic adapters,
+`check`/`try_commit`/`guarded()` session API, `to_context()` prompt rendering,
+session inspection (`dump()`, `session.graph`), commerce example. ~1,200
+lines, tested (table-driven per-axiom cases + property tests).
 
 Next: inference (transitive/inverse relations) with provenance-backed
 explanations; severity polish; SHACL export as a differential-testing oracle;

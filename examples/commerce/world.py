@@ -2,7 +2,7 @@
 an agent must not violate.
 """
 
-from lore import Entity, Lore, Relation, one_of, relation
+from lore import Entity, Graph, Lore, Relation, one_of, relation
 
 lore = Lore("commerce")
 
@@ -37,7 +37,7 @@ class Refund(Entity):
 
 
 @lore.rule(message="Refund {obj.id} of ${obj.amount} exceeds the total of order {obj.refunds}.")
-def refund_within_order_total(refund: Refund, graph) -> bool:
+def refund_within_order_total(refund: Refund, graph: Graph) -> bool:
     """Arbitrary-Python escape hatch: cross-object arithmetic via graph.get()."""
     order = graph.get(refund.refunds)
     return order is None or refund.amount <= order.total
