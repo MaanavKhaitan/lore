@@ -23,6 +23,7 @@ No RDF, no reasoner JVM, no graph database. Runtime dependency: pydantic.
 ```bash
 pip install -e .                  # core
 pip install -e ".[pydantic-ai]"   # + the Pydantic AI adapter
+pip install -e ".[anthropic]"     # + the live-agent example (Anthropic SDK)
 ```
 
 ## Declare your world
@@ -105,6 +106,29 @@ def check_against_ontology(output: Refund) -> Refund:
 The agent emits the double refund, receives the message above, and corrects
 itself — `python examples/commerce/agent_demo.py` runs the whole
 validate → explain → retry → pass loop offline with a scripted model.
+
+### Against a real model
+
+`examples/commerce/live_agent.py` runs the same loop against a live Anthropic
+agent, with the guard at both check points of a tool-use loop:
+
+- **before a tool call executes** — each `issue_refund` call is proposed
+  against the session first; a rejection returns the repair prompt as an
+  `is_error` tool result and writes nothing;
+- **on the final output** — the agent's structured summary is re-proposed
+  against the committed ledger, so a summary that violates the ontology or
+  claims a refund that was never issued bounces back too.
+
+```bash
+pip install -e ".[anthropic]"
+ANTHROPIC_API_KEY=... python examples/commerce/live_agent.py   # or put the key in a repo-root .env
+```
+
+The lookup tool plays a deliberately stale orders DB — no refund history, no
+account types — while the session knows both. The model walks into a
+cross-turn double refund and a payout redirected to a support-rep account,
+gets the two repair prompts above, declines the impossible request, and
+self-corrects the other. Costs a few cents per run.
 
 ## How it works
 
