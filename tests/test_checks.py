@@ -3,28 +3,28 @@ cross-turn, subclass, disjoint, atomicity, and severity scenarios."""
 
 import pytest
 
-from ontic import Entity, Ontology, Relation, one_of, relation
-from ontic.store import EdgeFact
+from lore import Entity, Lore, Relation, one_of, relation
+from lore.store import EdgeFact
 
-ont = Ontology("commerce-test")
+lore = Lore("commerce-test")
 
 
-@ont.entity
+@lore.entity
 class Customer(Entity):
     pass
 
 
-@ont.entity
+@lore.entity
 class VIPCustomer(Customer):
     pass
 
 
-@ont.entity
+@lore.entity
 class SupportRep(Entity):
-    ontic_disjoint_with = [Customer]
+    lore_disjoint_with = [Customer]
 
 
-@ont.entity
+@lore.entity
 class Order(Entity):
     status: str = one_of("paid", "shipped", "refunded")
     channel: str = one_of("web", "store", severity="flag")
@@ -32,20 +32,20 @@ class Order(Entity):
     placed_by: Relation[Customer]
 
 
-@ont.entity
+@lore.entity
 class Refund(Entity):
     amount: float
     refunds: Relation[Order] = relation(max_per_target=1)
     paid_to: Relation[Customer]
 
 
-@ont.rule(message="Refund {obj.id} of {obj.amount} exceeds the total of order {obj.refunds}.")
+@lore.rule(message="Refund {obj.id} of {obj.amount} exceeds the total of order {obj.refunds}.")
 def refund_within_total(refund: Refund, graph) -> bool:
     order = graph.get(refund.refunds)
     return order is None or refund.amount <= order.total
 
 
-guard = ont.compile()
+guard = lore.compile()
 
 
 def order(oid: str, *, status="paid", channel="web", total=100.0, placed_by="cust_1") -> Order:
@@ -198,17 +198,17 @@ def test_single_value_message_names_committed_and_proposed_values():
 def test_rules_rerun_when_staged_facts_touch_committed_nodes():
     # Setting a previously-unset field on a committed entity stages no TypeFact
     # (those dedupe away), but the entity's rules must still re-run.
-    ont2 = Ontology("rerun-test")
+    lore2 = Lore("rerun-test")
 
-    @ont2.entity
+    @lore2.entity
     class Doc(Entity):
         state: str | None = None
 
-    @ont2.rule(message="Doc {obj.id} may not be archived.")
+    @lore2.rule(message="Doc {obj.id} may not be archived.")
     def not_archived(doc: Doc, graph) -> bool:
         return doc.state != "archived"
 
-    session = ont2.compile().session()
+    session = lore2.compile().session()
     assert session.propose(Doc(id="d1")).ok
     session.commit()
     verdict = session.propose(Doc(id="d1", state="archived"))

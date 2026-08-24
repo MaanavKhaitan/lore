@@ -1,11 +1,11 @@
 """The user-facing DSL: ``Entity``, ``Relation[...]``, ``relation()``, ``one_of()``,
-and the ``Ontology`` registry.
+and the ``Lore`` registry.
 
-Pydantic models *are* the ontology carrier: users decorate models they already
+Pydantic models *are* the lore carrier: users decorate models they already
 have. Axioms live where their subject lives — per-field options inline via
 ``relation()``/``one_of()``, class-level disjointness via the
-``ontic_disjoint_with`` class attribute, cross-cutting predicates via
-``@ont.rule``. Python inheritance is the subclass hierarchy (read from
+``lore_disjoint_with`` class attribute, cross-cutting predicates via
+``@lore.rule``. Python inheritance is the subclass hierarchy (read from
 ``__mro__`` at compile/grounding time).
 """
 
@@ -23,27 +23,27 @@ if TYPE_CHECKING:
 Severity = Literal["reject", "flag"]
 
 
-class OntologyError(Exception):
-    """Raised for ontology definition/compile errors and session misuse.
+class LoreError(Exception):
+    """Raised for lore definition/compile errors and session misuse.
 
-    Modeled on Pydantic's philosophy: a broken ontology fails loudly at
+    Modeled on Pydantic's philosophy: a broken lore fails loudly at
     compile time, never silently at check time.
     """
 
 
 class Entity(pydantic.BaseModel):
-    """Base class for all ontology entities.
+    """Base class for all lore entities.
 
     Every entity has an ``id``; relation fields reference their target **by id
     string**, never by nested object or free-text name (unresolved ids surface
     as existence violations — that is a feature, not an extraction failure).
 
-    Declare disjointness by assigning ``ontic_disjoint_with = [OtherClass]`` in
+    Declare disjointness by assigning ``lore_disjoint_with = [OtherClass]`` in
     a subclass body (declared ``ClassVar`` here so Pydantic never mistakes the
     bare assignment for a field).
     """
 
-    ontic_disjoint_with: ClassVar[Sequence["type[Entity] | str"]] = ()
+    lore_disjoint_with: ClassVar[Sequence["type[Entity] | str"]] = ()
 
     id: str
 
@@ -81,7 +81,7 @@ def relation(*, max_per_target: int | None = None, severity: Severity = "reject"
     """
     return pydantic.Field(
         json_schema_extra={
-            "ontic": {"kind": "relation", "max_per_target": max_per_target, "severity": severity}
+            "lore": {"kind": "relation", "max_per_target": max_per_target, "severity": severity}
         }
     )
 
@@ -92,16 +92,16 @@ def one_of(*allowed: str, severity: Severity = "reject") -> Any:
         status: str = one_of("paid", "shipped", "refunded")
 
     Deliberately *not* a ``Literal`` type: a bad value must survive Pydantic
-    construction so the ontology layer can reject it with a repair prompt.
+    construction so the lore layer can reject it with a repair prompt.
     """
     return pydantic.Field(
-        json_schema_extra={"ontic": {"kind": "one_of", "one_of": list(allowed), "severity": severity}}
+        json_schema_extra={"lore": {"kind": "one_of", "one_of": list(allowed), "severity": severity}}
     )
 
 
 @dataclass(frozen=True)
 class _RawRule:
-    """A rule as registered by ``@ont.rule``; the target is resolved at compile."""
+    """A rule as registered by ``@lore.rule``; the target is resolved at compile."""
 
     name: str
     fn: Callable[..., Any]
@@ -110,9 +110,9 @@ class _RawRule:
     target: type[Entity] | str  # first-parameter annotation, possibly a forward-ref string
 
 
-class Ontology:
+class Lore:
     """Registry of entity classes and rules. ``compile()`` self-checks the
-    ontology and returns a :class:`~ontic.compile.Guard`.
+    lore and returns a :class:`~lore.compile.Guard`.
     """
 
     def __init__(self, name: str) -> None:
@@ -121,20 +121,20 @@ class Ontology:
         self._rules: list[_RawRule] = []
 
     def entity(self, cls: type[Entity]) -> type[Entity]:
-        """Class decorator registering an ``Entity`` subclass with this ontology.
+        """Class decorator registering an ``Entity`` subclass with this lore.
 
         Disjointness is declared on the class as
-        ``ontic_disjoint_with = [OtherClass, ...]`` (classes or name strings).
+        ``lore_disjoint_with = [OtherClass, ...]`` (classes or name strings).
         """
         if not (isinstance(cls, type) and issubclass(cls, Entity)):
-            raise OntologyError(
-                f"@{self.name}.entity expects a subclass of ontic.Entity, got {cls!r}"
+            raise LoreError(
+                f"@{self.name}.entity expects a subclass of lore.Entity, got {cls!r}"
             )
         existing = self._classes.get(cls.__name__)
         if existing is not None and existing is not cls:
-            raise OntologyError(
+            raise LoreError(
                 f"a different class named {cls.__name__!r} is already registered "
-                f"with ontology {self.name!r}; class names must be unique"
+                f"with lore {self.name!r}; class names must be unique"
             )
         self._classes[cls.__name__] = cls
         return cls
@@ -153,13 +153,13 @@ class Ontology:
         def decorate(fn: Callable[..., Any]) -> Callable[..., Any]:
             params = list(inspect.signature(fn).parameters.values())
             if len(params) != 2:
-                raise OntologyError(
+                raise LoreError(
                     f"rule {fn.__name__!r} must take exactly (obj, graph), "
                     f"got {len(params)} parameter(s)"
                 )
             target = params[0].annotation
             if target is inspect.Parameter.empty:
-                raise OntologyError(
+                raise LoreError(
                     f"rule {fn.__name__!r}: the first parameter needs a type annotation "
                     "naming the entity class the rule targets"
                 )
@@ -171,7 +171,7 @@ class Ontology:
         return decorate
 
     def compile(self) -> "Guard":
-        """Self-check the ontology and return a compiled :class:`Guard`."""
-        from .compile import compile_ontology
+        """Self-check the lore and return a compiled :class:`Guard`."""
+        from .compile import compile_lore
 
-        return compile_ontology(self)
+        return compile_lore(self)

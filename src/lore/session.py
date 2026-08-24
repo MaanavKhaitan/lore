@@ -13,7 +13,7 @@ from typing import Iterable
 
 from .compile import Guard
 from .engine import ground, run_checks
-from .schema import Entity, OntologyError
+from .schema import Entity, LoreError
 from .store import AttrFact, Fact, InMemoryStore, LayeredView, TypeFact
 from .verdict import Verdict, Violation
 
@@ -66,10 +66,10 @@ class Session:
         Flag-severity violations are committable; rejects are not.
         """
         if self._staged is None or self._last_verdict is None:
-            raise OntologyError("nothing to commit: call propose() first")
+            raise LoreError("nothing to commit: call propose() first")
         if not self._last_verdict.ok:
             rejects = len(self._last_verdict.rejects)
-            raise OntologyError(
+            raise LoreError(
                 f"cannot commit: the last verdict has {rejects} reject-severity violation(s)"
             )
         self._committed.add(self._staged)

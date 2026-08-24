@@ -8,30 +8,30 @@ from pydantic_ai import Agent
 from pydantic_ai.messages import ModelResponse, RetryPromptPart, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from ontic import Entity, Ontology, Relation, relation
-from ontic.adapters.pydantic_ai import validate_output
-from ontic.store import TypeFact
+from lore import Entity, Lore, Relation, relation
+from lore.adapters.pydantic_ai import validate_output
+from lore.store import TypeFact
 
-ont = Ontology("adapter-test")
+lore = Lore("adapter-test")
 
 
-@ont.entity
+@lore.entity
 class Customer(Entity):
     pass
 
 
-@ont.entity
+@lore.entity
 class Order(Entity):
     pass
 
 
-@ont.entity
+@lore.entity
 class Refund(Entity):
     refunds: Relation[Order] = relation(max_per_target=1)
     paid_to: Relation[Customer]
 
 
-guard = ont.compile()
+guard = lore.compile()
 
 INVALID_ARGS = {"id": "ref_2", "refunds": "ord_1", "paid_to": "cust_1"}  # ord_1 already refunded
 VALID_ARGS = {"id": "ref_2", "refunds": "ord_2", "paid_to": "cust_1"}
@@ -65,7 +65,7 @@ def test_repair_loop_invalid_then_valid():
     agent = Agent(FunctionModel(scripted_model), output_type=Refund)
 
     @agent.output_validator
-    def check_against_ontology(output: Refund) -> Refund:
+    def check_against_lore(output: Refund) -> Refund:
         return validate_output(session, output)
 
     result = agent.run_sync("Issue the refund the customer asked for.")

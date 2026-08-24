@@ -3,9 +3,10 @@
 > **Purpose of this doc:** complete context handoff for agents (and humans) joining this
 > project with zero prior knowledge. It captures the idea, the market research, every
 > settled design decision (with rationale), the v1 scope, and the open questions.
-> Last updated: 2026-08-23. Status: **Milestone 1 (vertical slice) implemented** —
-> see §5 Milestones; code lives in `src/ontic/`, demos in `examples/commerce/`.
-> Working name used throughout: `ontic` (placeholder; final name/PyPI not chosen).
+> Last updated: 2026-08-24. Status: **Milestone 1 (vertical slice) implemented** —
+> see §5 Milestones; code lives in `src/lore/`, demos in `examples/commerce/`.
+> Name: **`lore`** (chosen 2026-08-24, renamed from the `ontic` placeholder; the
+> `lore` dist name on PyPI is squatted, so the published distribution name is TBD).
 
 ---
 
@@ -132,7 +133,7 @@ quo. We win the way Pydantic won over hand-rolled `if`s: leverage, not capabilit
 4. **Declarative rules are analyzable**: contradiction detection between axioms,
    coverage/fuzzing, introspection, readable by compliance people. Same declaration
    also serves prompt context, docs, and a `can_i()` pre-flight tool.
-Escape hatch always exists (`@ont.rule` arbitrary Python) — pitch is "the 80% of
+Escape hatch always exists (`@lore.rule` arbitrary Python) — pitch is "the 80% of
 invariants that are relational patterns become declarations; infrastructure is shared."
 
 ---
@@ -144,14 +145,14 @@ invariants that are relational patterns become declarations; infrastructure is s
   JVM killed its DX. Users decorate Pydantic models they already have.
 - **An axiom lives where its subject lives**: per-class/per-field axioms inline on the
   model; cross-cutting rules registered on the ontology object.
-- `@ont.entity` explicit registration (no metaclass auto-magic); `Entity` base class;
+- `@lore.entity` explicit registration (no metaclass auto-magic); `Entity` base class;
   `Relation[Target]` fields carry OWL-style characteristics as kwargs
   (`functional=True`, `transitive=True`, `inverse_of=`, `min_count/max_count`,
   symmetric/asymmetric/irreflexive); `one_of(...)` for enums;
-  `ontic_disjoint_with = [...]` class attribute.
+  `lore_disjoint_with = [...]` class attribute.
 - **Python inheritance IS the subclass hierarchy** (read from `type(obj).__mro__`,
   filtered to registered entities). One source of truth; cannot drift.
-- `@ont.rule` — arbitrary Python predicate escape hatch, same Violation machinery.
+- `@lore.rule` — arbitrary Python predicate escape hatch, same Violation machinery.
 - v1 axiom vocabulary (deliberately small; recurs across every domain studied):
   functional, disjoint, domain/range (implicit from `Relation[Target]`), one_of,
   cardinality, existence (dangling ref), transitive, inverse, subclass,
@@ -247,7 +248,7 @@ machinery. Everything cut can be added without breaking users.
 
 | Cut from v1 | Replaced by | Bring back when |
 |---|---|---|
-| Expression DSL (`Path`, `Sum`, operator overloading) | `@ont.rule` Python functions | Same rule patterns hand-written 3× in real usage. Cost if built: ~500–800 lines but 1–2 weeks and ~2× conceptual surface (Pydantic metaclass fight over class-attribute access, `__eq__`/`__hash__` traps, un-overloadable chained comparisons / `and`). Cheap 80% substitute: named helper functions returning rule objects. |
+| Expression DSL (`Path`, `Sum`, operator overloading) | `@lore.rule` Python functions | Same rule patterns hand-written 3× in real usage. Cost if built: ~500–800 lines but 1–2 weeks and ~2× conceptual surface (Pydantic metaclass fight over class-attribute access, `__eq__`/`__hash__` traps, un-overloadable chained comparisons / `and`). Cheap 80% substitute: named helper functions returning rule objects. |
 | Generic Datalog engine (semi-naive fixpoint over compiled rules) | 3 special-cased procedures: subclass propagation at grounding (MRO), inverse normalization at insert, one transitive-closure routine with provenance (~100 lines) | A new axiom type needs genuine rule interaction |
 | Incremental check scoping | Full re-check per propose (µs at session scale); report violations involving staged facts | A profiler says so |
 | SHACL export + differential oracle | Table-driven unit tests + Hypothesis | Axiom vocabulary outgrows exhaustive unit-testing |
@@ -259,8 +260,8 @@ machinery. Everything cut can be added without breaking users.
 
 ### v1 repo layout (7 source files, ~800–1,200 lines)
 ```
-ontic/
-├── src/ontic/
+lore/
+├── src/lore/
 │   ├── __init__.py        # public API: Ontology, Entity, Relation, one_of
 │   ├── schema.py          # Entity, Relation, Ontology registry, @entity/@rule
 │   ├── compile.py         # ontology self-check (contradictory axioms, unknown
@@ -278,7 +279,7 @@ Split a file only past ~500 lines.
 ### Milestones
 1. **Vertical slice** — ✅ implemented 2026-08-23: schema DSL + ground + InMemoryStore +
    6 checks (existence, domain/range, max_per_target, single_value, one_of, disjoint) +
-   `@ont.rule` escape hatch + Verdict/repair prompts + Pydantic AI adapter + refund demo
+   `@lore.rule` escape hatch + Verdict/repair prompts + Pydantic AI adapter + refund demo
    + tests. No inference yet. Demos the double-refund catch (`examples/commerce/`).
 2. Inference (transitive/inverse/subclass) + provenance explanations.
 3. Severity/shadow mode polish, session seeding, (maybe) SHACL export + differential CI.
@@ -330,7 +331,7 @@ a refund was already processed."*
     agent told "ord_456 already refunded" may just refund ord_457); all-violations vs
     top-k; escalate on repeated near-misses. Nobody has published on this —
     potential novel finding.
-11. Prompt-side scope — `ont.to_context()` rendering the ontology into the system
+11. Prompt-side scope — `lore.to_context()` rendering the ontology into the system
     prompt (prevention) alongside validation (detection)? Lean yes, as one method.
     Enables the killer experiment: context-only vs validation-only vs both.
 12. License — MIT vs Apache-2.0 (lean Apache if a company might grow out of it).

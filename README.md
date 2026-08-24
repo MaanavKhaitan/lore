@@ -1,9 +1,9 @@
-# ontic
+# lore
 
-**Pydantic validates the shape of one object. ontic validates whether your
+**Pydantic validates the shape of one object. lore validates whether your
 agent's outputs make sense in your world.**
 
-Declare your business domain as an ontology — entity classes, relations, and
+Declare what's true in your world — entity classes, relations, and
 axioms — on Pydantic models you already have. Agent outputs and tool calls are
 **deterministically** checked against it: cross-object, cross-turn, stateful
 constraints that per-object schema validation structurally cannot express.
@@ -16,7 +16,7 @@ Violations render as natural-language repair prompts fed back to the agent.
 ```
 
 No RDF, no reasoner JVM, no graph database. Runtime dependency: pydantic.
-*(Working name — not on PyPI yet.)*
+*(Not on PyPI yet.)*
 
 ## Install
 
@@ -29,37 +29,37 @@ pip install -e ".[anthropic]"     # + the live-agent example (Anthropic SDK)
 ## Declare your world
 
 ```python
-from ontic import Entity, Ontology, Relation, one_of, relation
+from lore import Entity, Lore, Relation, one_of, relation
 
-ont = Ontology("commerce")
+lore = Lore("commerce")
 
-@ont.entity
+@lore.entity
 class Customer(Entity):
     name: str
 
-@ont.entity
+@lore.entity
 class SupportRep(Entity):
-    ontic_disjoint_with = [Customer]   # never both, same id
+    lore_disjoint_with = [Customer]   # never both, same id
     name: str
 
-@ont.entity
+@lore.entity
 class Order(Entity):
     status: str = one_of("paid", "shipped", "refunded")
     total: float
     placed_by: Relation[Customer]      # relations reference targets by id
 
-@ont.entity
+@lore.entity
 class Refund(Entity):
     amount: float
     refunds: Relation[Order] = relation(max_per_target=1)  # refund-once
     paid_to: Relation[Customer]
 
-@ont.rule(message="Refund {obj.id} of ${obj.amount} exceeds the total of order {obj.refunds}.")
+@lore.rule(message="Refund {obj.id} of ${obj.amount} exceeds the total of order {obj.refunds}.")
 def refund_within_order_total(refund: Refund, graph) -> bool:
     order = graph.get(refund.refunds)          # arbitrary-Python escape hatch
     return order is None or refund.amount <= order.total
 
-guard = ont.compile()   # broken ontologies fail loudly here, Pydantic-style
+guard = lore.compile()   # broken lore fails loudly here, Pydantic-style
 ```
 
 ## Catch the double refund
@@ -96,10 +96,10 @@ The repair prompt plugs straight into retry sockets that already exist.
 With Pydantic AI it's three lines:
 
 ```python
-from ontic.adapters.pydantic_ai import validate_output
+from lore.adapters.pydantic_ai import validate_output
 
 @agent.output_validator
-def check_against_ontology(output: Refund) -> Refund:
+def check_against_lore(output: Refund) -> Refund:
     return validate_output(session, output)   # ok → commit; bad → ModelRetry(repair_prompt)
 ```
 
@@ -116,7 +116,7 @@ agent, with the guard at both check points of a tool-use loop:
   against the session first; a rejection returns the repair prompt as an
   `is_error` tool result and writes nothing;
 - **on the final output** — the agent's structured summary is re-proposed
-  against the committed ledger, so a summary that violates the ontology or
+  against the committed ledger, so a summary that violates the lore or
   claims a refund that was never issued bounces back too.
 
 ```bash

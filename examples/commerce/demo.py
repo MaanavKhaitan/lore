@@ -6,7 +6,7 @@ make and prints each verdict plus the repair prompt that would be fed back.
 Run:  python examples/commerce/demo.py
 """
 
-from ontology import Customer, Order, Refund, SupportRep, guard
+from world import Customer, Order, Refund, SupportRep, guard
 
 session = guard.session(
     seed=[

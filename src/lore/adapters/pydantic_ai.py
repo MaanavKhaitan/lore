@@ -11,7 +11,7 @@ OutputT = TypeVar("OutputT", bound="Entity | Sequence[Entity]")
 
 
 def validate_output(session: Session, output: OutputT) -> OutputT:
-    """Validate an agent output against the session's ontology.
+    """Validate an agent output against the session's lore.
 
     Call inside an ``@agent.output_validator`` (or a tool body). If the verdict
     is ok the proposal is committed and ``output`` is returned; otherwise
@@ -23,7 +23,7 @@ def validate_output(session: Session, output: OutputT) -> OutputT:
     except ImportError as exc:  # pragma: no cover - exercised only without the extra
         raise ImportError(
             "the pydantic-ai adapter needs pydantic_ai installed: "
-            "pip install 'ontic[pydantic-ai]'"
+            "pip install 'lore[pydantic-ai]'"
         ) from exc
 
     objs = [output] if isinstance(output, Entity) else list(output)

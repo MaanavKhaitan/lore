@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "ontic"
+name = "lore"
 version = "0.1.0"
-description = "Deterministic ontology guardrails for agent outputs — Pydantic validates the shape of one object; ontic validates whether your agent's outputs make sense in your world."
+description = "Deterministic guardrails for agent outputs — Pydantic validates the shape of one object; lore validates whether your agent's outputs make sense in your world."
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Maanav Khaitan", email = "maanav@infiniteworlds.xyz" }]
@@ -19,7 +19,7 @@ anthropic = ["anthropic>=1.0"]
 dev = ["pytest>=8", "hypothesis>=6", "pydantic-ai>=0.2"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/ontic"]
+packages = ["src/lore"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
