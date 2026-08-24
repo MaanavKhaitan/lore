@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Callable, Iterable, Union
 
 from pydantic.fields import FieldInfo
 
+from .engine import _an
 from .schema import Entity, Ontology, OntologyError, Severity, _RawRule, _RelTarget
 
 if TYPE_CHECKING:
@@ -83,6 +84,63 @@ class Guard:
         from .session import Session
 
         return Session(self, seed=seed)
+
+    def to_context(self) -> str:
+        """Render the ontology as plain English for a system prompt.
+
+        Prevention to the session's detection: paste this into the agent's
+        prompt so it knows the rules before violating them (and so
+        context-only vs validation-only vs both can be compared). Output is
+        deterministic — classes and fields in declaration order, rules in
+        registration order.
+        """
+        lines = [
+            f"You are operating in the domain '{self.name}'. The entity classes and "
+            "rules below define what is valid; outputs that violate a rule are "
+            "rejected. Always reference existing entities by their exact id.",
+            "",
+            "Entities:",
+        ]
+        for name, compiled in self.classes.items():
+            parents = compiled.ancestors[1:]
+            header = f"{name} (a kind of {parents[0]})" if parents else name
+            fields = ["id"]
+            for field_name, attr in compiled.attributes.items():
+                if attr.owner != name:
+                    continue  # inherited — described on the declaring class
+                if attr.one_of is not None:
+                    allowed = ", ".join(repr(v) for v in attr.one_of)
+                    fields.append(f"{field_name} (one of {allowed}){_advisory(attr.severity)}")
+                else:
+                    fields.append(field_name)
+            for field_name, rel in compiled.relations.items():
+                if rel.owner != name:
+                    continue
+                fields.append(f"{field_name} -> {rel.target} id")
+            lines.append(f"- {header}: {', '.join(fields)}")
+        lines += ["", "Rules:"]
+        for a, b in self.disjoint_pairs:
+            lines.append(f"- Nothing can be both {_an(a)} and {_an(b)}.")
+        for spec in self.relations.values():
+            if spec.max_per_target is None:
+                continue
+            article = _an(spec.target)
+            lines.append(
+                f"- {article[0].upper()}{article[1:]} can have at most "
+                f"{spec.max_per_target} {spec.owner} pointing at it via "
+                f"'{spec.field}'.{_advisory(spec.severity)}"
+            )
+        flagged = [f"'{p}'" for p, spec in self.relations.items() if spec.severity == "flag"]
+        suffix = f" (advisory for {', '.join(flagged)}: flagged, not rejected)" if flagged else ""
+        lines.append(f"- Every relation field must reference an entity that exists.{suffix}")
+        for rule in self.rules:
+            template = rule.message.replace("{obj.", "{")
+            lines.append(f"- Never: {template}{_advisory(rule.severity)}")
+        return "\n".join(lines)
+
+
+def _advisory(severity: Severity) -> str:
+    return " (advisory: flagged, not rejected)" if severity == "flag" else ""
 
 
 def _ontic_extra(info: FieldInfo) -> dict[str, Any]:

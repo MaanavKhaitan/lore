@@ -16,7 +16,7 @@ from .store import AttrFact, EdgeFact, Fact, FactStore, Source, TypeFact
 from .verdict import Violation
 
 if TYPE_CHECKING:
-    from .compile import Guard
+    from .compile import CompiledClass, Guard
 
 
 def ground(guard: "Guard", obj: Entity, source: Source) -> list[Fact]:
@@ -43,8 +43,25 @@ def ground(guard: "Guard", obj: Entity, source: Source) -> list[Fact]:
     return facts
 
 
+def _most_specific(guard: "Guard", type_names: set[str]) -> "CompiledClass | None":
+    """The most specific registered class among ``type_names`` (most registered
+    ancestors wins; class name breaks ties deterministically)."""
+    candidates = [guard.classes[t] for t in type_names if t in guard.classes]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda c: (-len(c.ancestors), c.cls.__name__))
+    return candidates[0]
+
+
 class Graph:
-    """Read-only helper handed to ``@ont.rule`` functions."""
+    """Read-only view of the session graph.
+
+    This is the object handed to ``@ont.rule`` functions and exposed as
+    ``Session.graph`` — import it from ``ontic`` to annotate rule signatures::
+
+        @ont.rule(message="...")
+        def my_rule(refund: Refund, graph: ontic.Graph) -> bool: ...
+    """
 
     def __init__(self, guard: "Guard", view: FactStore) -> None:
         self._guard = guard
@@ -52,13 +69,9 @@ class Graph:
 
     def get(self, node_id: str) -> Entity | None:
         """Rehydrate an entity from its facts (``None`` if the node doesn't exist)."""
-        type_names = self._view.types_of(node_id)
-        candidates = [self._guard.classes[t] for t in type_names if t in self._guard.classes]
-        if not candidates:
+        compiled = _most_specific(self._guard, self._view.types_of(node_id))
+        if compiled is None:
             return None
-        # Most specific class = the one with the most registered ancestors.
-        candidates.sort(key=lambda c: (-len(c.ancestors), c.cls.__name__))
-        compiled = candidates[0]
         kwargs: dict[str, object] = {"id": node_id}
         for field_name, rel in compiled.relations.items():
             edges = self._view.edges_from(node_id, rel.predicate)

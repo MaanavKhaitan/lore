@@ -6,14 +6,17 @@ relational constraints, with violations rendered as natural-language repair
 prompts for the agent.
 """
 
+from .engine import Graph
 from .schema import Entity, Ontology, OntologyError, Relation, one_of, relation
 from .session import Session
-from .verdict import Verdict, Violation
+from .verdict import OntologyViolation, Verdict, Violation
 
 __all__ = [
     "Entity",
+    "Graph",
     "Ontology",
     "OntologyError",
+    "OntologyViolation",
     "Relation",
     "Session",
     "Verdict",

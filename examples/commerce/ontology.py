@@ -2,7 +2,7 @@
 an agent must not violate.
 """
 
-from ontic import Entity, Ontology, Relation, one_of, relation
+from ontic import Entity, Graph, Ontology, Relation, one_of, relation
 
 ont = Ontology("commerce")
 
@@ -37,7 +37,7 @@ class Refund(Entity):
 
 
 @ont.rule(message="Refund {obj.id} of ${obj.amount} exceeds the total of order {obj.refunds}.")
-def refund_within_order_total(refund: Refund, graph) -> bool:
+def refund_within_order_total(refund: Refund, graph: Graph) -> bool:
     """Arbitrary-Python escape hatch: cross-object arithmetic via graph.get()."""
     order = graph.get(refund.refunds)
     return order is None or refund.amount <= order.total

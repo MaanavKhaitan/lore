@@ -3,8 +3,12 @@
 > **Purpose of this doc:** complete context handoff for agents (and humans) joining this
 > project with zero prior knowledge. It captures the idea, the market research, every
 > settled design decision (with rationale), the v1 scope, and the open questions.
-> Last updated: 2026-08-23. Status: **Milestone 1 (vertical slice) implemented** —
-> see §5 Milestones; code lives in `src/ontic/`, demos in `examples/commerce/`.
+> Last updated: 2026-08-24. Status: **Milestone 1 (vertical slice) implemented**,
+> plus a DX pass (2026-08-24): `check`/`try_commit`/`guarded()` session API +
+> `OntologyViolation`, Anthropic adapter, `to_context()` (resolves open question
+> 11), exported `Graph` for typed rules, session inspection (`dump()`,
+> `session.graph`, reprs), `py.typed`.
+> See §5 Milestones; code lives in `src/ontic/`, demos in `examples/commerce/`.
 > Working name used throughout: `ontic` (placeholder; final name/PyPI not chosen).
 
 ---
@@ -253,7 +257,7 @@ machinery. Everything cut can be added without breaking users.
 | SHACL export + differential oracle | Table-driven unit tests + Hypothesis | Axiom vocabulary outgrows exhaustive unit-testing |
 | `escalate` severity + callbacks | Two levels: `reject`, `flag` (shadow mode) | Human-approval-queue demand |
 | Adapters beyond Pydantic AI; MCP proxy; fuzzer; benchmarks dir; docs site | One adapter; README is the docs | Post-launch; extra adapters are deliberate contribution bait (<50 lines, well-seamed) |
-| `@guard.tool_call` registry / auto-interception | User writes 3 lines inside their tool fn: construct entity → `session.propose()` → raise `ModelRetry` on bad verdict (~2–3 days if built; registry trivial, interception + unregistered-tool policy is the work) | Tedium at ~dozens of tools; returns naturally with the MCP-proxy milestone |
+| `@guard.tool_call` registry / auto-interception | `session.guarded()` context manager + `@guard_tool(session)` per-tool wrapper (Anthropic adapter) — 1–2 lines per tool, explicit, correct side-effect ordering (validate → effects → commit). Full registry/interception stays cut: no framework-neutral dispatch point exists yet (the natural one is the MCP proxy), and the unregistered-tool policy + arg→entity mapping DSL is the real work | Tedium at ~dozens of tools; returns naturally with the MCP-proxy milestone |
 | Per-predicate world-completeness + per-axiom trust requirements | One blunt documented rule ("session is closed-world over seed + committed") + a `source: "seed"\|"asserted"` tag on every fact NOW (cheap now, painful to retrofit) | A real use case breaks the blunt rule |
 | Concurrency handling | Document "sessions are single-threaded; one session per agent run" | Multi-agent/parallel-tool users appear (then: commit-time re-validation / serialized commits) |
 
@@ -330,9 +334,10 @@ a refund was already processed."*
     agent told "ord_456 already refunded" may just refund ord_457); all-violations vs
     top-k; escalate on repeated near-misses. Nobody has published on this —
     potential novel finding.
-11. Prompt-side scope — `ont.to_context()` rendering the ontology into the system
-    prompt (prevention) alongside validation (detection)? Lean yes, as one method.
-    Enables the killer experiment: context-only vs validation-only vs both.
+11. ~~Prompt-side scope~~ — **resolved 2026-08-24**: `guard.to_context()` (with an
+    `Ontology.to_context()` delegate) renders the ontology as deterministic
+    system-prompt English. Enables the killer experiment: context-only vs
+    validation-only vs both.
 12. License — MIT vs Apache-2.0 (lean Apache if a company might grow out of it).
 13. Injection hardening — violation messages interpolate graph data; a hostile display
     name becomes prompt injection *via the guardrail*. Quote/fence all data fields.
