@@ -13,6 +13,7 @@ dependencies = ["pydantic>=2.7"]
 
 [project.optional-dependencies]
 pydantic-ai = ["pydantic-ai>=0.2"]
+anthropic = ["anthropic>=1.0"]
 
 [dependency-groups]
 dev = ["pytest>=8", "hypothesis>=6", "pydantic-ai>=0.2"]
