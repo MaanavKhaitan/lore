@@ -1,8 +1,9 @@
-"""Session lifecycle: propose/commit/rollback, retry pollution, sources."""
+"""Session lifecycle: propose/commit/rollback, the ergonomic wrappers
+(check/try_commit/guarded), retry pollution, sources, and inspection."""
 
 import pytest
 
-from ontic import Entity, Ontology, OntologyError, Relation
+from ontic import Entity, Ontology, OntologyError, OntologyViolation, Relation, one_of
 from ontic.store import EdgeFact, TypeFact
 
 ont = Ontology("session-test")
@@ -112,3 +113,124 @@ def test_proposing_unregistered_entity_raises():
     session = guard.session()
     with pytest.raises(OntologyError, match="not registered"):
         session.propose(Rogue(id="r1"))
+
+
+# --- check / try_commit / guarded --------------------------------------------
+
+
+def test_check_is_a_preflight_with_zero_state_change():
+    session = guard.session(seed=[Target(id="t1")])
+    before = session.facts
+    assert session.check(Item(id="i1", name="widget", linked="t1")).ok
+    assert not session.check(Item(id="i2", name="broken", linked="ghost")).ok
+    assert session.facts == before and session.staged_facts == ()
+
+
+def test_try_commit_commits_when_ok():
+    session = guard.session(seed=[Target(id="t1")])
+    verdict = session.try_commit(Item(id="i1", name="widget", linked="t1"))
+    assert verdict.ok
+    assert TypeFact("i1", "Item", "asserted") in session.facts
+    assert session.staged_facts == ()
+
+
+def test_try_commit_rolls_back_on_reject():
+    session = guard.session(seed=[Target(id="t1")])
+    before = session.facts
+    verdict = session.try_commit(Item(id="bad", name="broken", linked="ghost"))
+    assert not verdict.ok
+    assert session.facts == before and session.staged_facts == ()
+
+
+def test_guarded_runs_body_then_commits():
+    session = guard.session(seed=[Target(id="t1")])
+    effects = []
+    with session.guarded(Item(id="i1", name="widget", linked="t1")) as verdict:
+        assert verdict.ok
+        assert TypeFact("i1", "Item", "asserted") not in session.facts  # not committed yet
+        effects.append("ran")
+    assert effects == ["ran"]
+    assert TypeFact("i1", "Item", "asserted") in session.facts
+
+
+def test_guarded_raises_before_body_on_reject():
+    session = guard.session(seed=[Target(id="t1")])
+    before = session.facts
+    with pytest.raises(OntologyViolation) as excinfo:
+        with session.guarded(Item(id="bad", name="broken", linked="ghost")):
+            raise AssertionError("body must not run")
+    err = excinfo.value
+    assert not err.verdict.ok
+    assert str(err) == err.repair_prompt == err.verdict.repair_prompt()
+    assert session.facts == before and session.staged_facts == ()
+
+
+def test_guarded_rolls_back_when_body_raises():
+    session = guard.session(seed=[Target(id="t1")])
+    before = session.facts
+    with pytest.raises(RuntimeError, match="ledger down"):
+        with session.guarded(Item(id="i1", name="widget", linked="t1")):
+            raise RuntimeError("ledger down")
+    assert session.facts == before and session.staged_facts == ()
+
+
+def test_guarded_forbids_session_calls_in_the_body():
+    session = guard.session(seed=[Target(id="t1")])
+    before = session.facts
+    with pytest.raises(OntologyError, match="guarded"):
+        with session.guarded(Item(id="i1", name="widget", linked="t1")):
+            session.propose(Item(id="i2", name="sneaky"))
+    assert session.facts == before and session.staged_facts == ()
+
+
+def test_guarded_yields_flag_violations_and_still_commits():
+    flag_ont = Ontology("flag-test")
+
+    @flag_ont.entity
+    class Note(Entity):
+        kind: str = one_of("a", "b", severity="flag")
+
+    session = flag_ont.compile().session()
+    with session.guarded(Note(id="n1", kind="weird")) as verdict:
+        assert verdict.ok and len(verdict.flags) == 1
+    assert TypeFact("n1", "Note", "asserted") in session.facts
+
+
+# --- inspection: graph / repr / dump ------------------------------------------
+
+
+def test_session_graph_reads_committed_and_staged():
+    session = guard.session(seed=[Target(id="t1")])
+    session.try_commit(Item(id="i1", name="widget", linked="t1"))
+    assert session.graph.get("i1") == Item(id="i1", name="widget", linked="t1")
+    session.propose(Item(id="i2", name="draft", linked="t1"))
+    assert session.graph.get("i2").name == "draft"  # staged facts are visible
+    incoming = session.graph.incoming("t1", "Item.linked")
+    assert {e.subject_id for e in incoming} == {"i1", "i2"}
+
+
+def test_session_repr_summarizes_state():
+    session = guard.session(seed=[Target(id="t1")])
+    r = repr(session)
+    assert "'session-test'" in r and "1 facts / 1 entities committed" in r
+    assert "0 staged" in r and "no verdict yet" in r
+    session.propose(Item(id="bad", name="broken", linked="ghost"))
+    assert "1 reject(s)" in repr(session)
+
+
+def test_dump_groups_by_entity():
+    session = guard.session(seed=[Target(id="t1")])
+    session.try_commit(Item(id="i1", name="widget", linked="t1"))
+    session.propose(Item(id="i2", name="draft", linked="t1"))
+    text = session.dump()
+    assert "committed:" in text and "staged:" in text
+    assert "t1: Target (seed)" in text
+    assert "i1: Item  name='widget'  linked → t1" in text
+    assert "i2: Item  name='draft'  linked → t1" in text
+
+
+def test_verdict_repr():
+    session = guard.session(seed=[Target(id="t1")])
+    assert repr(session.check(Item(id="i1", name="w", linked="t1"))) == "<Verdict: ok>"
+    bad = session.check(Item(id="i2", name="b", linked="ghost"))
+    assert repr(bad) == "<Verdict: 1 reject(s), 0 flag(s)>"

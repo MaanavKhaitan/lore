@@ -175,3 +175,9 @@ class Ontology:
         from .compile import compile_ontology
 
         return compile_ontology(self)
+
+    def to_context(self) -> str:
+        """Compile and render the ontology as system-prompt English — see
+        :meth:`ontic.compile.Guard.to_context` (call that directly if you
+        already hold a compiled guard)."""
+        return self.compile().to_context()

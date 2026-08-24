@@ -38,6 +38,11 @@ class Verdict:
     def flags(self) -> list[Violation]:
         return [v for v in self.violations if v.severity == "flag"]
 
+    def __repr__(self) -> str:
+        if not self.violations:
+            return "<Verdict: ok>"
+        return f"<Verdict: {len(self.rejects)} reject(s), {len(self.flags)} flag(s)>"
+
     def repair_prompt(self) -> str:
         """Natural-language repair prompt for the agent (reject-severity only)."""
         rejects = self.rejects
@@ -50,3 +55,21 @@ class Verdict:
             "action is impossible under these rules, say so instead of retrying it."
         )
         return "\n".join(lines)
+
+
+class OntologyViolation(Exception):
+    """A proposal drew reject-severity violations.
+
+    Raised by ``Session.guarded()``. This is the catch-and-convert seam for
+    integrations: the Pydantic AI adapter turns it into ``ModelRetry``, the
+    Anthropic helper into an ``is_error`` tool result, bare tool loops catch
+    it themselves. ``str(exc)`` is the rendered repair prompt.
+    """
+
+    def __init__(self, verdict: Verdict) -> None:
+        super().__init__(verdict.repair_prompt())
+        self.verdict = verdict
+
+    @property
+    def repair_prompt(self) -> str:
+        return self.verdict.repair_prompt()

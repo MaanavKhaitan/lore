@@ -14,9 +14,9 @@ def validate_output(session: Session, output: OutputT) -> OutputT:
     """Validate an agent output against the session's ontology.
 
     Call inside an ``@agent.output_validator`` (or a tool body). If the verdict
-    is ok the proposal is committed and ``output`` is returned; otherwise
-    ``pydantic_ai.ModelRetry`` is raised with the rendered repair prompt (the
-    rejected facts are discarded implicitly by the next propose).
+    is ok the proposal is committed and ``output`` is returned; otherwise the
+    proposal is rolled back (zero trace) and ``pydantic_ai.ModelRetry`` is
+    raised with the rendered repair prompt.
     """
     try:
         from pydantic_ai import ModelRetry
@@ -27,8 +27,7 @@ def validate_output(session: Session, output: OutputT) -> OutputT:
         ) from exc
 
     objs = [output] if isinstance(output, Entity) else list(output)
-    verdict = session.propose(*objs)
+    verdict = session.try_commit(*objs)
     if verdict.ok:
-        session.commit()
         return output
     raise ModelRetry(verdict.repair_prompt())
