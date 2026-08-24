@@ -59,5 +59,24 @@ def test_to_context_is_deterministic_and_reachable_from_the_ontology():
     assert guard.to_context() == guard.to_context() == ont.to_context()
 
 
+def test_to_context_marks_flag_severity_constraints_as_advisory():
+    flag_ont = Ontology("advisory")
+
+    @flag_ont.entity
+    class Node(Entity):
+        kind: str = one_of("a", "b", severity="flag")
+        parent: Relation["Node"] | None = relation(max_per_target=1, severity="flag")
+
+    text = flag_ont.to_context()
+    assert "kind (one of 'a', 'b') (advisory: flagged, not rejected)" in text
+    assert (
+        "at most 1 Node pointing at it via 'parent'. (advisory: flagged, not rejected)" in text
+    )
+    assert (
+        "- Every relation field must reference an entity that exists. "
+        "(advisory for 'Node.parent': flagged, not rejected)" in text
+    )
+
+
 def test_py_typed_marker_ships_with_the_package():
     assert (Path(ontic.__file__).parent / "py.typed").is_file()

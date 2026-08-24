@@ -156,6 +156,7 @@ from ontic.adapters.anthropic import guard_tool
 def issue_refund(order_id: str, amount: float, payout_account_id: str):
     refund = Refund(id=next_id(), amount=amount, refunds=order_id,
                     paid_to=payout_account_id)
+    entry = {"refund_id": refund.id, "order_id": order_id, "amount": amount}
 
     def issued():                        # runs only if the guard passes
         LEDGER.append(entry)

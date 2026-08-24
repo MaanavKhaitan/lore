@@ -110,7 +110,7 @@ class Guard:
                     continue  # inherited — described on the declaring class
                 if attr.one_of is not None:
                     allowed = ", ".join(repr(v) for v in attr.one_of)
-                    fields.append(f"{field_name} (one of {allowed})")
+                    fields.append(f"{field_name} (one of {allowed}){_advisory(attr.severity)}")
                 else:
                     fields.append(field_name)
             for field_name, rel in compiled.relations.items():
@@ -130,7 +130,9 @@ class Guard:
                 f"{spec.max_per_target} {spec.owner} pointing at it via "
                 f"'{spec.field}'.{_advisory(spec.severity)}"
             )
-        lines.append("- Every relation field must reference an entity that exists.")
+        flagged = [f"'{p}'" for p, spec in self.relations.items() if spec.severity == "flag"]
+        suffix = f" (advisory for {', '.join(flagged)}: flagged, not rejected)" if flagged else ""
+        lines.append(f"- Every relation field must reference an entity that exists.{suffix}")
         for rule in self.rules:
             template = rule.message.replace("{obj.", "{")
             lines.append(f"- Never: {template}{_advisory(rule.severity)}")

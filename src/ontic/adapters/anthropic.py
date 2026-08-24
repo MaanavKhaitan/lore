@@ -27,9 +27,10 @@ def guard_tool(session: Session) -> Callable[[Callable[..., Any]], Callable[...,
         def issue_refund(order_id: str, amount: float, payout_account_id: str):
             refund = Refund(id=..., amount=amount, refunds=order_id,
                             paid_to=payout_account_id)
+            entry = {"refund_id": refund.id, "order_id": order_id, "amount": amount}
 
             def issued():                        # runs only if the guard passes;
-                LEDGER.append(entry)             # rolled back if it raises
+                LEDGER.append(entry)             # the proposal is rolled back if it raises
                 return {"status": "issued", **entry}
 
             return refund, issued

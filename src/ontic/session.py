@@ -83,14 +83,18 @@ class Session:
     # --- ergonomic wrappers over propose/commit/rollback ----------------------
 
     def check(self, *objs: Entity) -> Verdict:
-        """Preflight — "can I do this?": propose, then roll back unconditionally.
+        """Preflight — "can I do this?": validate ``objs`` with zero state change.
 
-        Zero state change whatever the verdict; the returned verdict carries
-        the reasons. Use it to test a hypothetical action before taking it.
+        The check runs against the committed world; the returned verdict
+        carries the reasons. Afterwards the session is restored exactly as it
+        was, so (unlike ``propose``) a pending staged proposal survives a
+        ``check`` — it is safe to call anywhere.
         """
-        verdict = self.propose(*objs)
-        self.rollback()
-        return verdict
+        saved = (self._staged, self._staged_store, self._last_verdict)
+        try:
+            return self.propose(*objs)
+        finally:
+            self._staged, self._staged_store, self._last_verdict = saved
 
     def try_commit(self, *objs: Entity) -> Verdict:
         """Propose ``objs``, commit if the verdict is ok, roll back otherwise.
@@ -117,7 +121,8 @@ class Session:
         side effects from invalid proposals); an exception in the body rolls
         the proposal back (no commit for failed effects); a clean exit
         commits. The yielded verdict exposes flag-severity violations. Don't
-        call propose/commit/rollback inside the body.
+        call propose/commit/rollback inside the body (``check()`` is fine —
+        it leaves no trace).
         """
         verdict = self.propose(*objs)
         if not verdict.ok:

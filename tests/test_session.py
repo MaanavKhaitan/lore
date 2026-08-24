@@ -126,6 +126,23 @@ def test_check_is_a_preflight_with_zero_state_change():
     assert session.facts == before and session.staged_facts == ()
 
 
+def test_check_preserves_a_pending_staged_proposal():
+    session = guard.session(seed=[Target(id="t1")])
+    pending = session.propose(Item(id="i1", name="widget", linked="t1"))
+    staged_before = session.staged_facts
+    assert session.check(Item(id="i2", name="other", linked="t1")).ok
+    assert session.staged_facts == staged_before and session.last_verdict is pending
+    session.commit()  # the pending proposal is still committable
+    assert TypeFact("i1", "Item", "asserted") in session.facts
+
+
+def test_check_is_allowed_inside_a_guarded_body():
+    session = guard.session(seed=[Target(id="t1")])
+    with session.guarded(Item(id="i1", name="widget", linked="t1")):
+        assert not session.check(Item(id="i2", name="broken", linked="ghost")).ok
+    assert TypeFact("i1", "Item", "asserted") in session.facts
+
+
 def test_try_commit_commits_when_ok():
     session = guard.session(seed=[Target(id="t1")])
     verdict = session.try_commit(Item(id="i1", name="widget", linked="t1"))
