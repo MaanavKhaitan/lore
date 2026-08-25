@@ -5,17 +5,24 @@ is decided by the verdict, never by the writer. This prevents the three
 failure modes of validate-after-ingest: retry pollution (a rejected attempt
 leaves zero trace), side effects before judgment (proposals are checked as
 hypotheticals), and partial writes (multi-object proposals land atomically).
+
+Sessions are durable across processes: ``snapshot()`` serializes the committed
+graph to a JSON blob and ``restore()`` rehydrates it, so stateless deployments
+(one worker per agent turn) persist the blob wherever they already keep state.
 """
 
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager
-from typing import Iterable, Iterator
+from typing import Any, Iterable, Iterator
+
+from pydantic import TypeAdapter
 
 from .compile import Guard
 from .engine import Graph, _most_specific, ground, run_checks
 from .schema import Entity, LoreError
-from .store import AttrFact, Fact, FactStore, InMemoryStore, LayeredView, TypeFact
+from .store import AttrFact, EdgeFact, Fact, FactStore, InMemoryStore, LayeredView, TypeFact
 from .verdict import LoreViolation, Verdict, Violation
 
 __all__ = ["Session", "Verdict", "Violation"]
@@ -142,6 +149,75 @@ class Session:
             )
         self.commit()
 
+    # --- persistence -----------------------------------------------------------
+
+    def snapshot(self) -> str:
+        """Serialize the committed graph to a self-contained JSON blob.
+
+        The blob is storage-agnostic — put it in Redis, a Postgres row, or a
+        file, and rehydrate next turn with :meth:`Guard.restore`::
+
+            redis.set(f"lore:{run_id}", session.snapshot())
+            ...
+            session = guard.restore(redis.get(f"lore:{run_id}"))
+
+        Restore reproduces the committed store exactly (facts, insertion
+        order, seed/asserted sources), so verdicts and ``graph`` hydration
+        are identical across the round-trip. Snapshots capture
+        turn boundaries: persisting a pending proposal is almost certainly a
+        bug, so snapshotting with staged facts raises — commit or roll back
+        first. The blob is stamped with ``guard.fingerprint``; restoring
+        under a lore that has since changed fails loudly.
+        """
+        if self._staged is not None:
+            raise LoreError(
+                "cannot snapshot with a pending proposal: commit() or rollback() first"
+            )
+        adapters: dict[str, TypeAdapter[Any]] = {}
+        payload = {
+            "format": _SNAPSHOT_FORMAT,
+            "lore": self._guard.name,
+            "fingerprint": self._guard.fingerprint,
+            "facts": [
+                _encode_fact(self._guard, fact, adapters)
+                for fact in self._committed.all_facts()
+            ],
+        }
+        return json.dumps(payload, separators=(",", ":"))
+
+    @classmethod
+    def restore(cls, guard: Guard, blob: str | bytes) -> "Session":
+        """Rehydrate a session from a :meth:`snapshot` blob.
+
+        The restored facts are trusted as-is (they passed checks when they
+        were committed) — nothing is re-validated. Raises
+        :class:`~lore.schema.LoreError` if the blob is not a snapshot, uses
+        an unknown snapshot format, or was taken under a lore whose
+        fingerprint differs from ``guard.fingerprint``.
+        """
+        try:
+            data = json.loads(blob)
+        except (ValueError, TypeError, UnicodeDecodeError) as exc:
+            raise LoreError(f"not a lore session snapshot: {exc}") from exc
+        if not isinstance(data, dict) or not isinstance(data.get("facts"), list):
+            raise LoreError("not a lore session snapshot (no fact list)")
+        if data.get("format") != _SNAPSHOT_FORMAT:
+            raise LoreError(
+                f"unsupported snapshot format {data.get('format')!r} "
+                f"(this lore version reads format {_SNAPSHOT_FORMAT})"
+            )
+        if data.get("fingerprint") != guard.fingerprint:
+            raise LoreError(
+                f"snapshot was taken under lore {data.get('lore')!r} with fingerprint "
+                f"{data.get('fingerprint')!r}, but restoring under {guard.name!r} with "
+                f"{guard.fingerprint!r} — the lore has changed since this snapshot was "
+                "taken; restore with the original definition or start a fresh session"
+            )
+        session = cls(guard)
+        adapters: dict[str, TypeAdapter[Any]] = {}
+        session._committed.add(_decode_fact(guard, raw, adapters) for raw in data["facts"])
+        return session
+
     # --- inspection ------------------------------------------------------------
 
     @property
@@ -251,3 +327,86 @@ class Session:
             e.object_id == fact.object_id
             for e in self._committed.edges_from(fact.subject_id, fact.predicate)
         )
+
+
+# --- snapshot codec -----------------------------------------------------------
+# Attribute values round-trip through the owning field's Pydantic annotation
+# (datetime, Decimal, enums, ... come back as ``==``-equal values of the types
+# the rules saw before the snapshot, though pydantic may canonicalize e.g.
+# tzinfo implementations); a value the annotation cannot serialize or
+# re-validate raises instead of degrading silently. Ids/sources are plain str.
+
+_SNAPSHOT_FORMAT = 1
+_SOURCES = ("seed", "asserted")
+
+
+def _attr_adapter(guard: Guard, attr: str, adapters: dict[str, TypeAdapter[Any]]) -> TypeAdapter[Any]:
+    adapter = adapters.get(attr)
+    if adapter is None:
+        spec = guard.attributes.get(attr)
+        if spec is None:
+            raise LoreError(
+                f"snapshot refers to attribute {attr!r}, which is not in lore {guard.name!r}"
+            )
+        annotation = guard.classes[spec.owner].cls.model_fields[spec.field].annotation
+        adapter = adapters[attr] = TypeAdapter(annotation)
+    return adapter
+
+
+def _encode_fact(guard: Guard, fact: Fact, adapters: dict[str, TypeAdapter[Any]]) -> dict[str, Any]:
+    if isinstance(fact, TypeFact):
+        return {"kind": "type", "node": fact.node_id, "class": fact.type_name, "source": fact.source}
+    if isinstance(fact, EdgeFact):
+        return {
+            "kind": "edge",
+            "subject": fact.subject_id,
+            "predicate": fact.predicate,
+            "object": fact.object_id,
+            "source": fact.source,
+        }
+    try:
+        value = _attr_adapter(guard, fact.attr, adapters).dump_python(
+            fact.value, mode="json", warnings="error"
+        )
+    except LoreError:
+        raise
+    except Exception as exc:
+        raise LoreError(
+            f"cannot snapshot {fact.attr}={fact.value!r}: the value does not serialize "
+            f"through the field's annotation ({exc})"
+        ) from exc
+    return {"kind": "attr", "subject": fact.subject_id, "attr": fact.attr, "value": value,
+            "source": fact.source}
+
+
+def _decode_fact(guard: Guard, raw: Any, adapters: dict[str, TypeAdapter[Any]]) -> Fact:
+    try:
+        kind, source = raw["kind"], raw["source"]
+        if source not in _SOURCES:
+            raise LoreError(f"malformed snapshot fact (bad source): {raw!r}")
+        if kind == "type":
+            if raw["class"] not in guard.classes:
+                raise LoreError(
+                    f"snapshot types {raw['node']!r} as {raw['class']!r}, which is not "
+                    f"a class in lore {guard.name!r}"
+                )
+            return TypeFact(raw["node"], raw["class"], source)
+        if kind == "edge":
+            if raw["predicate"] not in guard.relations:
+                raise LoreError(
+                    f"snapshot refers to relation {raw['predicate']!r}, which is not "
+                    f"in lore {guard.name!r}"
+                )
+            return EdgeFact(raw["subject"], raw["predicate"], raw["object"], source)
+        if kind == "attr":
+            adapter = _attr_adapter(guard, raw["attr"], adapters)
+            try:
+                value = adapter.validate_python(raw["value"])
+            except Exception as exc:
+                raise LoreError(
+                    f"cannot restore {raw['attr']}={raw['value']!r} from a snapshot: {exc}"
+                ) from exc
+            return AttrFact(raw["subject"], raw["attr"], value, source)
+    except (KeyError, TypeError) as exc:
+        raise LoreError(f"malformed snapshot fact: {raw!r}") from exc
+    raise LoreError(f"malformed snapshot fact (unknown kind): {raw!r}")
