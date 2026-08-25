@@ -206,15 +206,40 @@ class _RawRule:
     target: type[Entity] | str  # first-parameter annotation, possibly a forward-ref string
 
 
+@dataclass(frozen=True)
+class _RawGoal(_RawRule):
+    """A goal as registered by ``@lore.goal``; same anatomy as a rule, resolved
+    at compile the same way."""
+
+
+def _predicate_target(fn: Callable[..., Any], kind: str) -> type[Entity] | str:
+    """Validate a rule/goal function's ``(obj, graph)`` signature and return the
+    first parameter's annotation — the target class or a forward-ref string."""
+    params = list(inspect.signature(fn).parameters.values())
+    if len(params) != 2:
+        raise LoreError(
+            f"{kind} {fn.__name__!r} must take exactly (obj, graph), "
+            f"got {len(params)} parameter(s)"
+        )
+    target = params[0].annotation
+    if target is inspect.Parameter.empty:
+        raise LoreError(
+            f"{kind} {fn.__name__!r}: the first parameter needs a type annotation "
+            f"naming the entity class the {kind} targets"
+        )
+    return target
+
+
 class Lore:
-    """Registry of entity classes and rules. ``compile()`` self-checks the
-    lore and returns a :class:`~lore.compile.Guard`.
+    """Registry of entity classes, rules, and goals. ``compile()`` self-checks
+    the lore and returns a :class:`~lore.compile.Guard`.
     """
 
     def __init__(self, name: str) -> None:
         self.name = name
         self._classes: dict[str, type[Entity]] = {}
         self._rules: list[_RawRule] = []
+        self._goals: list[_RawGoal] = []
 
     def entity(self, cls: type[Entity]) -> type[Entity]:
         """Class decorator registering an ``Entity`` subclass with this lore.
@@ -247,20 +272,43 @@ class Lore:
         """
 
         def decorate(fn: Callable[..., Any]) -> Callable[..., Any]:
-            params = list(inspect.signature(fn).parameters.values())
-            if len(params) != 2:
-                raise LoreError(
-                    f"rule {fn.__name__!r} must take exactly (obj, graph), "
-                    f"got {len(params)} parameter(s)"
-                )
-            target = params[0].annotation
-            if target is inspect.Parameter.empty:
-                raise LoreError(
-                    f"rule {fn.__name__!r}: the first parameter needs a type annotation "
-                    "naming the entity class the rule targets"
-                )
+            target = _predicate_target(fn, "rule")
             self._rules.append(
                 _RawRule(name=fn.__name__, fn=fn, message=message, severity=severity, target=target)
+            )
+            return fn
+
+        return decorate
+
+    def goal(self, *, message: str, severity: Severity = "reject"):
+        """Decorator registering a completeness goal — a rule for the output
+        boundary.
+
+        "At most one X" is a rule: violable by any single proposal. "At least
+        one X" is only false when the agent claims to be *done* — checking it
+        per proposal would reject every half-built world — so goals never run
+        during ``propose()``; they are checked by one
+        :meth:`~lore.session.Session.check_goals` call at the output boundary,
+        and rendered into :meth:`~lore.compile.Guard.to_context` so the agent
+        knows what "finished" means before it claims it.
+
+        The signature contract is identical to ``@lore.rule``: the function
+        takes ``(obj, graph)``, the first parameter's annotation names the
+        target entity class (subclass instances count), truthy means
+        "satisfied", and ``message`` is the *failure* text rendered with the
+        instance as ``{obj}``. ``severity="flag"`` goals are surfaced at the
+        boundary without blocking ``verdict.ok``.
+
+        A goal runs once per committed instance of its target class, so a goal
+        over a class with no instances passes vacuously. A world-level "there
+        must exist a Contract at all" is deliberately out of scope — sessions
+        seed their anchor entities, and goals hang completeness off them.
+        """
+
+        def decorate(fn: Callable[..., Any]) -> Callable[..., Any]:
+            target = _predicate_target(fn, "goal")
+            self._goals.append(
+                _RawGoal(name=fn.__name__, fn=fn, message=message, severity=severity, target=target)
             )
             return fn
 

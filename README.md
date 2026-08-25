@@ -156,11 +156,12 @@ and a session that survives process boundaries.
 ## Guard a tool call
 
 `propose`/`commit`/`rollback` is the transactional core; three wrappers cover
-the everyday shapes:
+the everyday shapes, and `check_goals` covers the output boundary:
 
 ```python
 verdict = session.check(refund)        # preflight "can I?" — zero state change
 verdict = session.try_commit(refund)   # commit if ok, roll back otherwise
+verdict = session.check_goals()        # output boundary "am I done?" (see goals below)
 
 with session.guarded(refund):          # raises LoreViolation on rejects
     ledger.append(entry)               # side effects run only if valid;
@@ -216,6 +217,25 @@ example: a drafting agent's negotiation playbook as lore — approved-library
 existence, walk-away vs. escalate severities, immutable defined terms.
 `live_agent.py` next to it drafts a full MSA live, every tool guarded, with
 this rendered playbook as the system prompt (needs ANTHROPIC_API_KEY).
+
+## "At most one X" is a rule; "at least one X" is a goal
+
+A finished contract must contain a governing-law clause — but that can't be a
+`@lore.rule`: it is only false when the agent claims to be *done*, and checking
+it per proposal would reject every half-drafted world. Declare it as a **goal**
+and check it once, at the output boundary:
+
+```python
+@lore.goal(message="Contract {obj.id} has no governing-law clause.")
+def has_governing_law(contract: Contract, graph: Graph) -> bool:
+    return len(graph.incoming(contract.id, "GoverningLawClause.governs")) == 1
+
+verdict = session.check_goals()   # zero state change; repair_prompt() on failure
+```
+
+Goals never run during `propose()`; `to_context()` renders them under
+"Goals — checked when you finish", so prevention and detection stay one
+declaration. `examples/contracts/` uses both halves.
 
 ## Close the loop with an agent
 

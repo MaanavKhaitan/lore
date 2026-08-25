@@ -10,7 +10,7 @@ from .store import Fact
 
 @dataclass(frozen=True)
 class Violation:
-    check: str  # "max_per_target", "range", "rule:paid_to_buyer", ...
+    check: str  # "max_per_target", "range", "rule:paid_to_buyer", "goal:has_fee", ...
     severity: Severity
     message: str  # fully rendered English, names concrete ids
     subjects: tuple[str, ...] = ()  # node ids involved
@@ -21,7 +21,8 @@ class Violation:
 
 @dataclass
 class Verdict:
-    """Outcome of one ``Session.propose``. Deterministically ordered and deduped."""
+    """Outcome of one ``Session.propose`` (or ``check_goals``). Deterministically
+    ordered and deduped."""
 
     violations: list[Violation] = field(default_factory=list)
 
@@ -52,6 +53,13 @@ class Verdict:
         rejects = self.rejects
         if not rejects:
             return ""
+        if all(v.check.startswith("goal:") for v in rejects):
+            # A goal-only verdict comes from the output boundary: the world is
+            # valid, just unfinished — ask for completion, not correction.
+            lines = [f"The work is not finished: it violates {len(rejects)} goal(s) of this domain:"]
+            lines += [f"  {i}. {v.message}" for i, v in enumerate(rejects, start=1)]
+            lines.append("Complete the missing items, then finish.")
+            return "\n".join(lines)
         lines = [f"Your output violates {len(rejects)} rule(s) of this domain:"]
         lines += [f"  {i}. {v.message}" for i, v in enumerate(rejects, start=1)]
         lines.append(

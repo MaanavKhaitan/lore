@@ -8,7 +8,9 @@ it into the prompt (prevention), and the session enforces it deterministically
 when the model ignores it (detection). The two severities have exact playbook
 meanings: walk-away terms are ``severity="reject"`` (never commits), and
 escalate-to-counsel terms are ``severity="flag"`` (commits, but surfaced for
-review before signature).
+review before signature). Completeness — what a *finished* MSA must
+contain — is declared the same way, as ``@lore.goal``s checked by one
+``session.check_goals()`` call at the output boundary.
 
 Atomicity discipline: existence checks fire immediately, so a clause that
 uses *new* defined terms must be proposed atomically with them —
@@ -125,9 +127,8 @@ def liability_cap_meets_floor(cap: LiabilityCapClause, graph: Graph) -> bool:
     engine re-checks committed caps differentially (a later fee that would
     flip this rule is itself rejected), and the companion rule below rejects
     the cap-before-fees ordering outright — rejecting the actual mistake
-    beats rejecting the fee the deal memo requires. The demo's beat-12
-    completeness sweep re-checks the floor at the output boundary as a
-    belt-and-suspenders.
+    beats rejecting the fee the deal memo requires. The caps_cover_fees goal
+    below re-checks the floor at the output boundary as a belt-and-suspenders.
     """
     # graph.incoming returns EdgeFacts; rehydrate the subjects via graph.get.
     fees = [
@@ -168,6 +169,49 @@ def mfn_needs_counsel_review(clause: MFNClause, graph: Graph) -> bool:
 )
 def indemnitor_is_not_indemnitee(clause: IndemnityClause, graph: Graph) -> bool:
     return clause.indemnitor != clause.indemnitee
+
+
+# --- completeness goals: what a *finished* MSA must contain -------------------
+# "At most one governing-law clause" is a rule — violable by a single proposal.
+# "At least one" is only false when the agent claims to be done, so these run
+# via session.check_goals() at the output boundary, never per proposal, and
+# render into to_context() as "Goals — checked when you finish".
+
+
+@lore.goal(message="Contract {obj.id} has no governing-law clause.")
+def has_governing_law(contract: Contract, graph: Graph) -> bool:
+    # max_per_target=1 on 'governs' already rejects a second clause at proposal
+    # time, so at the boundary "exactly one" can only fail as zero.
+    return len(graph.incoming(contract.id, "GoverningLawClause.governs")) == 1
+
+
+@lore.goal(message="Contract {obj.id} has no fee clause.")
+def has_fee_schedule(contract: Contract, graph: Graph) -> bool:
+    return len(graph.incoming(contract.id, "FeeClause.for_contract")) >= 1
+
+
+@lore.goal(message="Contract {obj.id} has no limitation-of-liability clause.")
+def has_liability_cap(contract: Contract, graph: Graph) -> bool:
+    return len(graph.incoming(contract.id, "LiabilityCapClause.caps")) >= 1
+
+
+@lore.goal(
+    message="A liability cap on {obj.id} is below the playbook floor of 12 months of fees."
+)
+def caps_cover_fees(contract: Contract, graph: Graph) -> bool:
+    # Belt-and-suspenders: the differential rule re-check already rejects any
+    # proposal that would flip liability_cap_meets_floor on a committed cap, so
+    # this goal is unreachable — kept so the output boundary re-states the
+    # walk-away floor over the final graph.
+    fees = [
+        graph.get(e.subject_id)
+        for e in graph.incoming(contract.id, "FeeClause.for_contract")
+    ]
+    caps = [
+        graph.get(e.subject_id)
+        for e in graph.incoming(contract.id, "LiabilityCapClause.caps")
+    ]
+    return all(cap.cap_cents >= 12 * fee.monthly_fee_cents for cap in caps for fee in fees)
 
 
 guard = lore.compile()
