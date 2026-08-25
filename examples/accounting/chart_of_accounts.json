@@ -1,0 +1,17 @@
+[
+  {"id": "acct_cash", "type": "Asset", "name": "Cash"},
+  {"id": "acct_ar", "type": "Asset", "name": "Accounts Receivable"},
+  {"id": "acct_inventory", "type": "Asset", "name": "Inventory"},
+  {"id": "acct_prepaid_rent", "type": "Asset", "name": "Prepaid Rent"},
+  {"id": "acct_equipment", "type": "Asset", "name": "Equipment"},
+  {"id": "acct_ap", "type": "Liability", "name": "Accounts Payable"},
+  {"id": "acct_accrued_liabilities", "type": "Liability", "name": "Accrued Liabilities"},
+  {"id": "acct_notes_payable", "type": "Liability", "name": "Notes Payable"},
+  {"id": "acct_share_capital", "type": "Equity", "name": "Share Capital"},
+  {"id": "acct_retained_earnings", "type": "Equity", "name": "Retained Earnings"},
+  {"id": "acct_sales", "type": "Revenue", "name": "Sales Revenue"},
+  {"id": "acct_service_revenue", "type": "Revenue", "name": "Service Revenue"},
+  {"id": "acct_supplies", "type": "Expense", "name": "Office Supplies Expense"},
+  {"id": "acct_rent", "type": "Expense", "name": "Rent Expense"},
+  {"id": "acct_salaries", "type": "Expense", "name": "Salaries Expense"}
+]
