@@ -328,6 +328,28 @@ def test_irreflexive_cycle_message_renders_provenance_chain_with_steps():
     ]
 
 
+def test_irreflexive_cycle_chain_orients_inverse_asserted_edges():
+    # A cycle closed from the inverse side: 'b manages a' is stored in its
+    # asserted orientation (b→a on Emp.manages) but the boss chain traverses
+    # it a→b — the rendered chain must still close the loop back to b.
+    hr = Lore("irreflexive-inverse-chain")
+
+    @hr.entity
+    class Emp(Entity):
+        boss: Relation["Emp"] | None = relation(transitive=True, irreflexive=True, default=None)
+        manages: Relation["Emp"] | None = relation(inverse_of="boss", default=None)
+
+    session = hr.compile().session(seed=[Emp(id="a")])
+    session.try_commit(Emp(id="b", boss="a"))
+    verdict = session.propose(Emp(id="b", manages="a"))
+    (violation,) = verdict.violations
+    assert violation.message == (
+        "b cannot reach itself via 'boss', but this proposal creates a "
+        "cycle: b → a (already committed at step 1) → b (proposed)."
+    )
+    assert violation.subjects == ("b", "a")
+
+
 def test_inverse_cross_direction_message_names_both_subjects_with_steps():
     session = make_session(committed=[[Employee(id="emp_1", badge="b_1")]])
     verdict = session.propose(Badge(id="b_1", holder="emp_2"))

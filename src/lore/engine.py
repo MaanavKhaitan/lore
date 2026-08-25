@@ -70,11 +70,21 @@ def _base_path(ctx: CheckContext, edge: EdgeFact) -> tuple[EdgeFact, ...]:
     return derivation.base_path if derivation is not None else (edge,)
 
 
-def _render_chain(path: tuple[EdgeFact, ...], staged_keys: set[EdgeKey]) -> str:
-    """``a → b (already committed at step 1) → a (proposed)`` for a base path."""
-    parts = [path[0].subject_id]
+def _chain_nodes(start: str, path: tuple[EdgeFact, ...]) -> list[str]:
+    """The nodes a base path visits, walking from ``start`` and orienting each
+    base fact against the current node — a base fact asserted on the inverse
+    predicate is stored flipped relative to the traversal direction."""
+    nodes = [start]
     for edge in path:
-        parts.append(f"→ {edge.object_id} ({_mark(edge, _edge_key(edge) in staged_keys)})")
+        nodes.append(edge.object_id if edge.subject_id == nodes[-1] else edge.subject_id)
+    return nodes
+
+
+def _render_chain(start: str, path: tuple[EdgeFact, ...], staged_keys: set[EdgeKey]) -> str:
+    """``a → b (already committed at step 1) → a (proposed)`` for a base path."""
+    parts = [start]
+    for node, edge in zip(_chain_nodes(start, path)[1:], path):
+        parts.append(f"→ {node} ({_mark(edge, _edge_key(edge) in staged_keys)})")
     return " ".join(parts)
 
 
@@ -364,12 +374,12 @@ def check_irreflexive(ctx: CheckContext) -> list[Violation]:
                 message = f"{edge.subject_id} cannot point at itself via '{spec.field}'."
                 subjects: tuple[str, ...] = (edge.subject_id,)
             else:
-                chain = _render_chain(path, ctx.staged_edge_keys)
+                chain = _render_chain(edge.subject_id, path, ctx.staged_edge_keys)
                 message = (
                     f"{edge.subject_id} cannot reach itself via '{spec.field}', but "
                     f"this proposal creates a cycle: {chain}."
                 )
-                subjects = (edge.subject_id, *[e.object_id for e in path[:-1]])
+                subjects = tuple(_chain_nodes(edge.subject_id, path)[:-1])
             out.append(
                 Violation(
                     check="irreflexive",
