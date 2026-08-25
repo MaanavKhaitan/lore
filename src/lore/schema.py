@@ -117,10 +117,13 @@ def relation(
     to make an optional relation (``Relation[X] | None``) constructible
     without the field.
 
-    Note: ``@lore.rule`` functions on committed nodes re-run only when a
-    staged fact touches the node directly, not when only its derived
-    neighborhood changes — sound for monotone rules (e.g. approver-in-chain:
-    chains only ever grow).
+    Note: ``@lore.rule`` functions on committed nodes re-run whenever the node
+    is the subject of a staged fact **or the direct target of an asserted
+    staged edge** — so aggregate rules (a sum over ``graph.incoming``) hold
+    against later stray edges. Only *derived*-neighborhood-only changes
+    (mirrors, transitive closure) are excluded, so the monotone caveat applies
+    only to closure-dependent rules (e.g. approver-in-chain: chains only ever
+    grow).
     """
     return pydantic.Field(
         default=default,

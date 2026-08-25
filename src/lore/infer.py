@@ -152,6 +152,10 @@ class CheckContext:
     staged_edge_keys: set[EdgeKey]
     staged_nodes: set[str]  # nodes with a staged TypeFact
     staged_subjects: set[str]  # every node a staged fact asserts something about
+    # Nodes whose rules must re-run: staged subjects plus the direct targets of
+    # asserted staged edges — an incoming edge can break an aggregate rule on an
+    # otherwise-untouched committed node.
+    rule_nodes: set[str]
     single_value_view: FactStore  # asserted + symmetric mirrors
     cardinality_view: FactStore  # asserted + symmetric and inverse mirrors
     relational_view: FactStore  # asserted + all mirrors + closure
@@ -168,15 +172,18 @@ def build_context(guard: "Guard", view: FactStore, staged: list[Fact]) -> CheckC
     single_value_view = LayeredView(view, derivations.sym_mirrors)
     cardinality_view = LayeredView(single_value_view, derivations.inv_mirrors)
     relational_view = LayeredView(cardinality_view, derivations.closure)
+    staged_subjects = {
+        f.node_id if isinstance(f, TypeFact) else f.subject_id for f in staged
+    }
     return CheckContext(
         guard=guard,
         view=view,
         staged=staged,
         staged_edge_keys=staged_edge_keys,
         staged_nodes={f.node_id for f in staged if isinstance(f, TypeFact)},
-        staged_subjects={
-            f.node_id if isinstance(f, TypeFact) else f.subject_id for f in staged
-        },
+        staged_subjects=staged_subjects,
+        rule_nodes=staged_subjects
+        | {f.object_id for f in staged if isinstance(f, EdgeFact)},
         single_value_view=single_value_view,
         cardinality_view=cardinality_view,
         relational_view=relational_view,
