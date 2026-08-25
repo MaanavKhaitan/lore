@@ -88,8 +88,10 @@ class Guard:
 
         Two independently defined lores with identical declarations produce
         the same fingerprint; any semantic change (classes, ancestry,
-        relation/attribute options, severities, disjointness, rule
-        registrations) produces a different one. Session snapshots are
+        relation/attribute options, attribute field types, severities,
+        disjointness, rule registrations) produces a different one — attr
+        values round-trip through their annotations, so a changed annotation
+        would otherwise silently coerce restored values. Session snapshots are
         stamped with it and ``restore`` refuses a mismatch. Caveat:
         ``@lore.rule`` function *bodies* are not hashed — only their
         name/message/severity/target — so renaming a rule invalidates old
@@ -108,6 +110,7 @@ class Guard:
                         s.attr,
                         s.owner,
                         s.field,
+                        str(self.classes[s.owner].cls.model_fields[s.field].annotation),
                         None if s.one_of is None else [repr(v) for v in s.one_of],
                         s.severity,
                     ]

@@ -159,6 +159,31 @@ def test_restore_refuses_a_changed_lore():
         changed.compile().restore(blob)
 
 
+def test_restore_refuses_a_changed_field_type():
+    # attr values round-trip through their annotations; without this refusal a
+    # snapshotted datetime would silently restore as its ISO string
+    blob = seeded_session().snapshot()
+    changed = Lore("snapshot-test")
+
+    @changed.entity
+    class Customer(Entity):
+        name: str
+
+    @changed.entity
+    class Order(Entity):
+        status: str = one_of("paid", "shipped", "refunded")
+        placed_at: str  # was datetime
+        placed_by: Relation[Customer]
+
+    @changed.entity
+    class Refund(Entity):
+        amount: float
+        refunds: Relation[Order] = relation(max_per_target=1)
+
+    with pytest.raises(LoreError, match="lore has changed"):
+        changed.compile().restore(blob)
+
+
 def test_restore_refuses_garbage():
     for blob in ["{not json", "[]", '{"format": 1}', '{"format": 99, "facts": []}']:
         with pytest.raises(LoreError):
@@ -250,6 +275,15 @@ def test_fingerprint_changes_with_semantics():
     @v.entity
     class Customer(Entity):
         name: str = one_of("Ada", severity="flag")
+
+    fingerprints.append(v.compile().fingerprint)
+
+    v = Lore("snapshot-test")  # a field type change — values round-trip
+    # through the annotation, so this must invalidate old snapshots
+
+    @v.entity
+    class Customer(Entity):
+        name: int
 
     fingerprints.append(v.compile().fingerprint)
 
