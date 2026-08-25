@@ -338,3 +338,33 @@ def test_scalar_values_round_trip_exactly(values):
     restored = prop_guard.restore(session.snapshot())
     assert restored.facts == session.facts
     assert restored.dump() == session.dump()
+
+
+# --- multi-valued relations: EdgeFacts serialize individually, so a many-edged
+# session must round-trip with no codec changes.
+
+many = Lore("snapshot-many")
+
+
+@many.entity
+class Tag(Entity):
+    pass
+
+
+@many.entity
+class Doc(Entity):
+    tags: Relation[list[Tag]] = relation(default=[])
+
+
+many_guard = many.compile()
+
+
+def test_many_edged_session_round_trips_identically():
+    session = many_guard.session(seed=[Tag(id="t1"), Tag(id="t2"), Tag(id="t3")])
+    assert session.try_commit(Doc(id="d1", tags=["t2", "t1"])).ok
+    assert session.try_commit(Doc(id="d1", tags=["t2", "t1", "t3"])).ok  # accretion at step 2
+    restored = many_guard.restore(session.snapshot())
+    assert restored.facts == session.facts
+    assert [f.step for f in restored.facts] == [f.step for f in session.facts]
+    assert restored.dump() == session.dump()
+    assert restored.graph.get("d1").tags == session.graph.get("d1").tags == ["t2", "t1", "t3"]

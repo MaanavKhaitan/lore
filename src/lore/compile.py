@@ -34,6 +34,7 @@ class RelationSpec:
     target: str  # registered target class name (after forward-ref resolution)
     max_per_target: int | None
     severity: Severity
+    many: bool = False  # Relation[list[X]]: one edge per element, set-with-accretion
     # Relation characteristics (inert defaults keep equality stable for
     # inherited fields). ``asymmetric=True`` implies ``irreflexive=True`` here.
     transitive: bool = False
@@ -122,6 +123,9 @@ class Guard:
                         s.symmetric,
                         s.asymmetric,
                         s.irreflexive,
+                        # Appended only for many fields, so scalar-only lores
+                        # keep their pre-many fingerprints (and snapshots).
+                        *(["many"] if s.many else []),
                     ]
                     for _, s in sorted(self.relations.items())
                 ],
@@ -197,7 +201,10 @@ class Guard:
             for field_name, rel in compiled.relations.items():
                 if rel.owner != name:
                     continue
-                fields.append(f"{field_name} -> {rel.target} id")
+                if rel.many:
+                    fields.append(f"{field_name} -> {rel.target} ids (zero or more)")
+                else:
+                    fields.append(f"{field_name} -> {rel.target} id")
             lines.append(f"- {header}: {', '.join(fields)}")
         lines += ["", "Rules:"]
         for a, b in self.disjoint_pairs:
@@ -435,6 +442,7 @@ def compile_lore(lore: Lore) -> Guard:
                     target_name,
                     max_per_target,
                     severity,
+                    many=rel.many,
                     transitive=bool(extra.get("transitive")),
                     symmetric=bool(extra.get("symmetric")),
                     asymmetric=bool(extra.get("asymmetric")),

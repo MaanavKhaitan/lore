@@ -57,9 +57,16 @@ class Graph:
         kwargs: dict[str, object] = {"id": node_id}
         for field_name, rel in compiled.relations.items():
             edges = self._view.edges_from(node_id, rel.predicate)
-            if edges:
-                # Newest value wins: staged facts follow committed ones in view
-                # order, so a proposal under check hydrates with its own values.
+            if rel.many:
+                # The full list in view insertion order (committed before
+                # staged) — always set, so a required many field with zero
+                # edges hydrates as []. Order is deterministic but not
+                # semantic; rules should treat the list as a set.
+                kwargs[field_name] = [e.object_id for e in edges]
+            elif edges:
+                # Newest value wins for scalar fields: staged facts follow
+                # committed ones in view order, so a proposal under check
+                # hydrates with its own values.
                 kwargs[field_name] = edges[-1].object_id
         for field_name, attr in compiled.attributes.items():
             for fact in self._view.attrs(attr.attr):
