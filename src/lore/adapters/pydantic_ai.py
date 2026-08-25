@@ -6,6 +6,7 @@ from typing import Sequence, TypeVar
 
 from ..schema import Entity
 from ..session import Session
+from . import as_entities
 
 OutputT = TypeVar("OutputT", bound="Entity | Sequence[Entity]")
 
@@ -26,8 +27,7 @@ def validate_output(session: Session, output: OutputT) -> OutputT:
             "pip install 'lore[pydantic-ai]'"
         ) from exc
 
-    objs = [output] if isinstance(output, Entity) else list(output)
-    verdict = session.try_commit(*objs)
+    verdict = session.try_commit(*as_entities(output))
     if verdict.ok:
         return output
     raise ModelRetry(verdict.repair_prompt())

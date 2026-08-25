@@ -8,9 +8,14 @@
 > `check`/`try_commit`/`guarded()` session API + `LoreViolation`, Anthropic
 > adapter, `to_context()` (resolves open question 11), exported `Graph` for
 > typed rules, session inspection (`dump()`, `session.graph`, reprs),
-> `py.typed`. Milestone 2 (2026-08-24): the inference layer — relation
-> characteristics, provenance-carrying derived facts, cycle detection, commit
-> step numbers, seed validation, `graph.reachable()` (see §4.11 and §5).
+> `py.typed`. Durable sessions (2026-08-24): `Session.snapshot()`/
+> `Guard.restore()` JSON round-trip + `Guard.fingerprint` content-hash
+> (resolves the session half of open question 8) — the persistence answer for
+> stateless deployments, see §4.7. Milestone 2 (2026-08-24): the inference
+> layer — relation characteristics, provenance-carrying derived facts, cycle
+> detection, commit step numbers, seed validation, `graph.reachable()` (see
+> §4.11 and §5); snapshots carry commit steps and the fingerprint hashes
+> relation characteristics + inverse pairs.
 > See §5 Milestones; code lives in `src/lore/`, demos in `examples/commerce/`
 > and `examples/hr/`.
 > Name: **`lore`** (chosen 2026-08-24, renamed from the `ontic` placeholder). The
@@ -227,6 +232,13 @@ optimistic-concurrency fix for the commit race has a natural home.
   the whole bet. No graph DB, no rdflib at runtime.
 - Keep a ~5-method `FactStore` protocol so graph-DB/live-DB backends can arrive later as
   adapters (trigger: a user wanting validation against a live enterprise KG).
+- **Durable sessions** (2026-08-24): `session.snapshot()` → storage-agnostic JSON blob
+  (committed facts only; snapshotting a pending proposal raises — snapshots are turn
+  boundaries), `guard.restore(blob)` rehydrates exactly (facts, order, sources; attr
+  values round-trip through their field annotations, so datetimes stay datetimes).
+  Blobs are stamped with `Guard.fingerprint`; restore refuses a mismatch. This — not a
+  DB backend — is the persistence answer for stateless deployments (worker-per-turn):
+  the user stores the blob wherever they already keep state. Still no DB at runtime.
 
 ### 4.8 Enforcement point: post-hoc validate + repair (not constrained decoding)
 Grammar-level enforcement is solved by others and cannot express our constraints; CRANE
@@ -380,8 +392,10 @@ a refund was already processed."*
    user recursion → escape hatch). Negation-as-failure interacts dangerously with #1.
 6. Concurrent-commit race — v1 documents single-threaded sessions; later optimistic
    re-validation at commit.
-8. Ontology versioning — content-hash compiled ontology; stamp sessions/verdicts;
-   refuse rehydration across incompatible hashes (cheap, do early).
+8. Ontology versioning — **session half resolved 2026-08-24**: `Guard.fingerprint`
+   (sha256 over the declarative semantics; `@lore.rule` *bodies* deliberately not
+   hashed — deterministic across processes beats catching silent logic edits) stamps
+   snapshots, and `restore` refuses a mismatch. Still open: stamping verdicts.
 9. Rollout modes — observe/enforce per axiom ships v1 (flag severity); analytics later.
 10. Repair-prompt shape — state *what's true* vs *what the check wants* (Goodhart risk:
     agent told "ord_456 already refunded" may just refund ord_457); all-violations vs

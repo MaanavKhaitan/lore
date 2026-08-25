@@ -9,7 +9,9 @@ specs, disjoint pairs, and rules that sessions and checks read from.
 
 from __future__ import annotations
 
+import hashlib
 import inspect
+import json
 import types
 import typing
 from dataclasses import dataclass, field
@@ -87,6 +89,65 @@ class Guard:
         self.disjoint_pairs = disjoint_pairs
         self.rules = rules
         self.inverses = inverses or {}  # predicate → inverse predicate, both directions
+        self._fingerprint: str | None = None
+
+    @property
+    def fingerprint(self) -> str:
+        """Content-hash of everything that can change a verdict.
+
+        Two independently defined lores with identical declarations produce
+        the same fingerprint; any semantic change (classes, ancestry,
+        relation/attribute options, attribute field types, severities,
+        disjointness, rule registrations) produces a different one — attr
+        values round-trip through their annotations, so a changed annotation
+        would otherwise silently coerce restored values. Session snapshots are
+        stamped with it and ``restore`` refuses a mismatch. Caveat:
+        ``@lore.rule`` function *bodies* are not hashed — only their
+        name/message/severity/target — so renaming a rule invalidates old
+        snapshots, but silently editing its logic does not.
+        """
+        if self._fingerprint is None:
+            spec = {
+                "lore": self.name,
+                "classes": {name: list(c.ancestors) for name, c in sorted(self.classes.items())},
+                "relations": [
+                    [
+                        s.predicate,
+                        s.owner,
+                        s.field,
+                        s.target,
+                        s.max_per_target,
+                        s.severity,
+                        s.transitive,
+                        s.symmetric,
+                        s.asymmetric,
+                        s.irreflexive,
+                    ]
+                    for _, s in sorted(self.relations.items())
+                ],
+                # The completed pair map, not per-spec inverse_of: declaring an
+                # inverse from either side is the same semantics, so it must be
+                # the same fingerprint.
+                "inverses": sorted(sorted(pair) for pair in self.inverses.items()),
+                "attributes": [
+                    [
+                        s.attr,
+                        s.owner,
+                        s.field,
+                        str(self.classes[s.owner].cls.model_fields[s.field].annotation),
+                        None if s.one_of is None else [repr(v) for v in s.one_of],
+                        s.severity,
+                    ]
+                    for _, s in sorted(self.attributes.items())
+                ],
+                "disjoint": [list(pair) for pair in self.disjoint_pairs],
+                "rules": [[r.name, r.message, r.severity, r.target] for r in self.rules],
+            }
+            digest = hashlib.sha256(
+                json.dumps(spec, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
+            self._fingerprint = f"sha256:{digest}"
+        return self._fingerprint
 
     def session(self, seed: Iterable[Entity] = (), *, validate_seed: bool = True) -> "Session":
         """Open a session, grounding ``seed`` instances as trusted facts.
@@ -97,6 +158,13 @@ class Guard:
         from .session import Session
 
         return Session(self, seed=seed, validate_seed=validate_seed)
+
+    def restore(self, blob: str | bytes) -> "Session":
+        """Rehydrate a session from a :meth:`~lore.session.Session.snapshot`
+        blob (see there for the durability contract)."""
+        from .session import Session
+
+        return Session.restore(self, blob)
 
     def to_context(self) -> str:
         """Render the lore as plain English for a system prompt.

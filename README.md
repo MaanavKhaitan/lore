@@ -168,6 +168,28 @@ renders the world grouped by entity (committed vs staged, seeds marked), and
 `session.graph` exposes the same read API rules receive
 (`graph.get(id)`, `graph.incoming(id, "Refund.refunds")`).
 
+## Persist the session between turns
+
+Real deployments are stateless: each agent turn lands on whichever worker
+picks it up, and an in-process session dies with the process. `snapshot()`
+serializes the committed graph to a compact JSON blob — store it wherever you
+already keep state and rehydrate next turn:
+
+```python
+redis.set(f"lore:{run_id}", session.snapshot())       # end of turn N
+...
+session = guard.restore(redis.get(f"lore:{run_id}"))  # start of turn N+1
+```
+
+Restore reproduces the committed graph exactly — facts, order, seed
+markings — so cross-turn rules like refund-once keep firing across processes.
+Attribute values round-trip through their field annotations (a `datetime`
+comes back a `datetime`). The blob is stamped with `guard.fingerprint`, a
+content-hash of the lore's validation semantics: restoring under a lore that
+has since changed raises instead of silently validating old facts against new
+rules. Snapshots capture turn boundaries — snapshotting with an uncommitted
+proposal raises too.
+
 ## Put the rules in the prompt too
 
 ```python
@@ -280,7 +302,8 @@ most once" by reusing an old refund's id.
 Milestone 1: schema DSL, grounding, in-memory store, 6 axiom checks + rule
 escape hatch, verdicts/repair prompts, Pydantic AI + Anthropic adapters,
 `check`/`try_commit`/`guarded()` session API, `to_context()` prompt rendering,
-session inspection (`dump()`, `session.graph`), commerce example.
+durable sessions (`snapshot()`/`restore()` + lore fingerprint), session
+inspection (`dump()`, `session.graph`), commerce example.
 
 Milestone 2 (this): the inference layer — relation characteristics
 (`transitive`, `symmetric`, `asymmetric`, `irreflexive`, `inverse_of`) with
@@ -292,3 +315,6 @@ approval-chain example. Tested table-driven per axiom + Hypothesis properties.
 Next: severity/shadow-mode polish; SHACL export as a differential-testing
 oracle; an MCP tool-call proxy; a benchmark for axiom-violation feedback vs
 generic retry. See `CONTEXT.md` for the full design rationale and research.
+
+Want lore in a framework we don't cover? Adapters are ~30 lines —
+[CONTRIBUTING.md](CONTRIBUTING.md) has the contract and a template.
