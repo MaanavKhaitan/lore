@@ -202,7 +202,7 @@ class Guard:
                 if rel.owner != name:
                     continue
                 if rel.many:
-                    fields.append(f"{field_name} -> {rel.target} ids (one or more)")
+                    fields.append(f"{field_name} -> {rel.target} ids (zero or more)")
                 else:
                     fields.append(f"{field_name} -> {rel.target} id")
             lines.append(f"- {header}: {', '.join(fields)}")

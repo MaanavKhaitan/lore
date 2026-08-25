@@ -123,4 +123,4 @@ def test_to_context_renders_many_relation_distinctly():
         defined_in: Relation[Term] | None = relation(default=None)
 
     text = contracts.to_context()
-    assert "- Clause: id, uses_terms -> Term ids (one or more), defined_in -> Term id" in text
+    assert "- Clause: id, uses_terms -> Term ids (zero or more), defined_in -> Term id" in text
