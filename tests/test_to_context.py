@@ -108,3 +108,19 @@ def test_to_context_renders_relation_characteristics():
 
 def test_py_typed_marker_ships_with_the_package():
     assert (Path(lore_pkg.__file__).parent / "py.typed").is_file()
+
+
+def test_to_context_renders_many_relation_distinctly():
+    contracts = Lore("many-ctx")
+
+    @contracts.entity
+    class Term(Entity):
+        pass
+
+    @contracts.entity
+    class Clause(Entity):
+        uses_terms: Relation[list[Term]] = relation(default=[])
+        defined_in: Relation[Term] | None = relation(default=None)
+
+    text = contracts.to_context()
+    assert "- Clause: id, uses_terms -> Term ids (one or more), defined_in -> Term id" in text

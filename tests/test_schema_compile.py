@@ -1,5 +1,7 @@
 """Registration, forward-ref resolution, and every compile-time self-check."""
 
+from typing import List
+
 import pytest
 
 from lore import Entity, Lore, LoreError, Relation, one_of, relation
@@ -384,6 +386,112 @@ def test_relation_default_makes_optional_relation_constructible():
 
     lore.compile()
     assert Node(id="n1").linked is None
+
+
+# --- multi-valued relations: Relation[list[X]] ---------------------------------
+
+
+def test_many_relation_class_string_and_forwardref_forms_compile():
+    lore = Lore("t")
+
+    @lore.entity
+    class Term(Entity):
+        pass
+
+    @lore.entity
+    class Clause(Entity):
+        by_class: Relation[list[Term]] = relation(default=[])
+        by_string: Relation[list["Term"]] = relation(default=[])
+        by_forwardref: Relation[List["Term"]] = relation(default=[])  # typing.List → ForwardRef
+
+    guard = lore.compile()
+    for field in ("by_class", "by_string", "by_forwardref"):
+        spec = guard.relations[f"Clause.{field}"]
+        assert spec.target == "Term" and spec.many is True
+
+
+def test_many_relation_forward_reference_to_later_class_resolves():
+    lore = Lore("t")
+
+    @lore.entity
+    class Clause(Entity):
+        sections: Relation[list["Section"]] = relation(default=[])
+
+    @lore.entity
+    class Section(Entity):
+        pass
+
+    spec = lore.compile().relations["Clause.sections"]
+    assert spec.target == "Section" and spec.many is True
+
+
+def test_many_relation_union_none_form_compiles():
+    lore = Lore("t")
+
+    @lore.entity
+    class Term(Entity):
+        pass
+
+    @lore.entity
+    class Clause(Entity):
+        uses: Relation[list[Term]] | None = relation(default=None)
+
+    assert lore.compile().relations["Clause.uses"].many is True
+    assert Clause(id="c1").uses is None
+
+
+def test_many_relation_accepts_all_relation_options():
+    lore = Lore("t")
+
+    @lore.entity
+    class Section(Entity):
+        contains: Relation[list["Section"]] = relation(
+            transitive=True, irreflexive=True, max_per_target=1, severity="flag", default=[]
+        )
+
+    spec = lore.compile().relations["Section.contains"]
+    assert spec.many and spec.transitive and spec.irreflexive
+    assert spec.max_per_target == 1 and spec.severity == "flag"
+
+
+def test_one_of_on_many_relation_field_raises():
+    lore = Lore("t")
+
+    @lore.entity
+    class Term(Entity):
+        pass
+
+    @lore.entity
+    class Clause(Entity):
+        uses: Relation[list[Term]] = one_of("a", "b")
+
+    with pytest.raises(LoreError, match="one_of\\(\\) cannot be used on a relation"):
+        lore.compile()
+
+
+def test_fingerprint_differs_between_scalar_and_many():
+    def build(many):
+        lore = Lore("fp")
+
+        @lore.entity
+        class Term(Entity):
+            pass
+
+        if many:
+
+            @lore.entity
+            class Clause(Entity):
+                uses: Relation[list[Term]]
+
+        else:
+
+            @lore.entity
+            class Clause(Entity):
+                uses: Relation[Term]
+
+        return lore.compile().fingerprint
+
+    assert build(many=True) != build(many=False)
 
 
 def test_mro_ancestors_for_registered_subclass():

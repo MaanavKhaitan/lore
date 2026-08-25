@@ -165,3 +165,29 @@ def test_inverse_pair_direction_agnosticism(from_tag_side):
         # design, on top of the direction-agnostic cardinality catch.
         expected.add(("single_value", ("t_0", "w_0", f"w_{n}")))
     assert {(v.check, v.subjects) for v in verdict.violations} == expected
+
+
+# --- (e) many-relation ground → hydrate: order-preserving set semantics --------
+
+lore_e = Lore("prop-many")
+
+
+@lore_e.entity
+class Label(Entity):
+    pass
+
+
+@lore_e.entity
+class Doc(Entity):
+    tags: Relation[list[Label]] = relation(default=[])
+
+
+guard_e = lore_e.compile()
+
+
+@given(st.lists(st.text(min_size=1, max_size=6), max_size=10))
+def test_many_ground_then_hydrate_dedupes_preserving_order(tags):
+    store = InMemoryStore()
+    store.add(ground(guard_e, Doc(id="d", tags=tags), "asserted"))
+    rebuilt = Graph(guard_e, store).get("d")
+    assert rebuilt.tags == list(dict.fromkeys(tags))

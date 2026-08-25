@@ -62,6 +62,12 @@ def refund_within_order_total(refund: Refund, graph: Graph) -> bool:
 guard = lore.compile()   # broken lore fails loudly here, Pydantic-style
 ```
 
+A list target declares a multi-valued relation — `uses_terms:
+Relation[list[DefinedTerm]] = relation(default=[])` grounds one edge per id,
+checked per element. Facts are append-only, so the list accretes like a set:
+re-proposing an id with a grown list adds the new references, never removes
+any, and rules always receive the full list (`[]` when it has no edges).
+
 ## Catch the double refund
 
 ```python

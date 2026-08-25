@@ -334,3 +334,41 @@ def test_verdict_repr():
     assert repr(session.check(Item(id="i1", name="w", linked="t1"))) == "<Verdict: ok>"
     bad = session.check(Item(id="i2", name="b", linked="ghost"))
     assert repr(bad) == "<Verdict: 1 reject(s), 0 flag(s)>"
+
+
+# --- multi-valued relations: hydration and dump ---------------------------------
+
+many_lore = Lore("session-many-test")
+
+
+@many_lore.entity
+class Tag(Entity):
+    pass
+
+
+@many_lore.entity
+class Doc(Entity):
+    tags: Relation[list[Tag]]  # required: [] must still round-trip
+
+
+many_guard = many_lore.compile()
+
+
+def test_graph_get_returns_the_full_list_committed_and_staged():
+    session = many_guard.session(seed=[Tag(id="t1"), Tag(id="t2"), Tag(id="t3")])
+    assert session.try_commit(Doc(id="d1", tags=["t1", "t2"])).ok
+    assert session.graph.get("d1").tags == ["t1", "t2"]
+    assert session.propose(Doc(id="d1", tags=["t1", "t2", "t3"])).ok
+    assert session.graph.get("d1").tags == ["t1", "t2", "t3"]  # staged edge visible
+
+
+def test_empty_list_required_many_field_round_trips_through_graph_get():
+    session = many_guard.session(seed=[Tag(id="t1")])
+    assert session.try_commit(Doc(id="d1", tags=[])).ok
+    assert session.graph.get("d1") == Doc(id="d1", tags=[])
+
+
+def test_dump_shows_every_many_edge():
+    session = many_guard.session(seed=[Tag(id="t1"), Tag(id="t2")])
+    assert session.try_commit(Doc(id="d1", tags=["t1", "t2"])).ok
+    assert "d1: Doc  tags → t1  tags → t2" in session.dump()

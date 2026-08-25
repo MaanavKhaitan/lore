@@ -42,7 +42,15 @@ def ground(guard: "Guard", obj: Entity, source: Source) -> list[Fact]:
         value = getattr(obj, field_name)
         if value is None:
             continue
-        facts.append(EdgeFact(obj.id, rel.predicate, value, source))
+        if rel.many:
+            # One edge per element, order-preserving dedupe so staged_facts
+            # reads clean (the store would dedupe anyway); [] → zero edges.
+            facts.extend(
+                EdgeFact(obj.id, rel.predicate, object_id, source)
+                for object_id in dict.fromkeys(value)
+            )
+        else:
+            facts.append(EdgeFact(obj.id, rel.predicate, value, source))
     for field_name, attr in compiled.attributes.items():
         value = getattr(obj, field_name)
         if value is None:
@@ -223,11 +231,14 @@ def check_max_per_target(ctx: CheckContext) -> list[Violation]:
 
 
 def check_single_value(ctx: CheckContext) -> list[Violation]:
-    """Every field is scalar: a node holds at most one value per relation and
-    per attribute, and committed values are immutable. Fires when a proposal
-    re-asserts a committed entity id with a changed value, or asserts two
-    values for one id in a single proposal. For relation fields this is what
-    enforces OWL-functional ("at most one object per subject") across turns.
+    """Scalar fields hold one value: a node holds at most one value per scalar
+    relation and per attribute, and committed values are immutable. Fires when
+    a proposal re-asserts a committed entity id with a changed value, or
+    asserts two values for one id in a single proposal. For scalar relation
+    fields this is what enforces OWL-functional ("at most one object per
+    subject") across turns. Many (``Relation[list[X]]``) predicates are
+    skipped: their facts accrete as a set, so multiple edges per subject are
+    the point, not a violation.
 
     Symmetric mirrors count (so "B married to both A and C" is caught even
     when both facts were asserted from the other side); inverse mirrors do
@@ -239,6 +250,8 @@ def check_single_value(ctx: CheckContext) -> list[Violation]:
     ]
     out = []
     for predicate, spec in ctx.guard.relations.items():
+        if spec.many:
+            continue
         by_subject: dict[str, list[EdgeFact]] = {}
         for edge in ctx.single_value_view.edges(predicate):
             by_subject.setdefault(edge.subject_id, []).append(edge)

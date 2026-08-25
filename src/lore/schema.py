@@ -13,7 +13,18 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, Any, Callable, ClassVar, Literal, Sequence
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    Callable,
+    ClassVar,
+    ForwardRef,
+    Literal,
+    Sequence,
+    get_args,
+    get_origin,
+)
 
 import pydantic
 from pydantic_core import PydanticUndefined
@@ -54,17 +65,25 @@ class _RelTarget:
     """Annotation marker carrying a relation's target class (or forward-ref name)."""
 
     target: type[Entity] | str
+    many: bool = False
 
 
 class Relation:
     """Typing-only marker: ``Relation[Order]`` (or ``Relation["Order"]`` as a
     forward reference) annotates a field as a relation whose value is the
-    target entity's id string.
+    target entity's id string. ``Relation[list[Order]]`` declares a
+    multi-valued relation whose value is a list of target ids — see
+    :func:`relation` for its set-with-accretion semantics.
     """
 
-    def __class_getitem__(cls, target: type[Entity] | str) -> Any:
+    def __class_getitem__(cls, target: Any) -> Any:
         # Annotated[str, ...] keeps pydantic's runtime type as plain str while
         # preserving the target in FieldInfo.metadata for compile-time introspection.
+        if get_origin(target) is list:
+            (inner,) = get_args(target)
+            if isinstance(inner, ForwardRef):
+                inner = inner.__forward_arg__
+            return Annotated[list[str], _RelTarget(inner, many=True)]
         return Annotated[str, _RelTarget(target)]
 
 
@@ -85,10 +104,29 @@ def relation(
 
     ``max_per_target=1`` means "a given target may be pointed to by at most one
     subject via this relation" — OWL calls this *inverse-functional*. (Plain
-    OWL-functional, "at most one object per subject", holds for every relation
-    field: values are scalar ids, and the ``single_value`` check rejects
-    re-asserting a committed subject with a different target.) The explicit
-    kwarg avoids the jargon trap.
+    OWL-functional, "at most one object per subject", holds for every scalar
+    relation field: values are scalar ids, and the ``single_value`` check
+    rejects re-asserting a committed subject with a different target.) The
+    explicit kwarg avoids the jargon trap.
+
+    A relation field is scalar by default. A list target declares a
+    **multi-valued** relation whose value is a list of target ids::
+
+        uses_terms: Relation[list[DefinedTerm]] = relation(default=[])
+
+    Grounding emits one edge per distinct list element (order-preserving
+    dedupe; an empty list emits zero edges), and the per-edge checks —
+    existence, range, domain, ``max_per_target`` — apply per element. Because
+    facts are append-only, a multi-valued field has **set semantics with
+    accretion**, deliberately unlike the scalar immutability above:
+    re-proposing an id whose list differs stages only the *new* edges, so
+    references can be added across turns but never removed, and
+    ``single_value`` does not apply. Rehydration (``graph.get`` and the
+    objects handed to rules) always sets the field to the full list of target
+    ids in insertion order — ``[]`` when there are no edges. The order is
+    deterministic but not semantic; rules should treat the list as a set.
+    Every option below is legal on a multi-valued field; prefer
+    ``default=[]`` over ``Relation[list[X]] | None`` for an optional one.
 
     The relation characteristics feed the inference pass — derived edges are
     checked but never committed, and every derived violation renders the base
