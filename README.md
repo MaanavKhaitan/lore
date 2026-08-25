@@ -226,3 +226,6 @@ Next: inference (transitive/inverse relations) with provenance-backed
 explanations; severity polish; SHACL export as a differential-testing oracle;
 an MCP tool-call proxy; a benchmark for axiom-violation feedback vs generic
 retry. See `CONTEXT.md` for the full design rationale and research.
+
+Want lore in a framework we don't cover? Adapters are ~30 lines —
+[CONTRIBUTING.md](CONTRIBUTING.md) has the contract and a template.
