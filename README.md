@@ -211,6 +211,12 @@ disjointness, cardinality, and rules — so the same declaration serves
 prevention (the model knows the rules) and detection (violations are caught
 anyway when it ignores them).
 
+`python examples/contracts/demo.py` (no API key) runs the playbook-enforcement
+example: a drafting agent's negotiation playbook as lore — approved-library
+existence, walk-away vs. escalate severities, immutable defined terms.
+`live_agent.py` next to it drafts a full MSA live, every tool guarded, with
+this rendered playbook as the system prompt (needs ANTHROPIC_API_KEY).
+
 ## Close the loop with an agent
 
 The repair prompt plugs straight into retry sockets that already exist.
