@@ -198,6 +198,194 @@ def test_rule_with_unregistered_target_raises():
         lore.compile()
 
 
+# --- relation characteristics: contradictions and inverse pairing --------------
+
+
+def test_symmetric_and_asymmetric_raises():
+    lore = Lore("t")
+
+    @lore.entity
+    class Node(Entity):
+        peer: Relation["Node"] = relation(symmetric=True, asymmetric=True)
+
+    with pytest.raises(LoreError, match="both symmetric and asymmetric"):
+        lore.compile()
+
+
+def test_symmetric_transitive_irreflexive_raises():
+    lore = Lore("t")
+
+    @lore.entity
+    class Node(Entity):
+        peer: Relation["Node"] = relation(symmetric=True, transitive=True, irreflexive=True)
+
+    with pytest.raises(LoreError, match="unsatisfiable"):
+        lore.compile()
+
+
+def test_symmetric_requires_own_class_target():
+    lore = Lore("t")
+
+    @lore.entity
+    class Other(Entity):
+        pass
+
+    @lore.entity
+    class Node(Entity):
+        peer: Relation[Other] = relation(symmetric=True)
+
+    with pytest.raises(LoreError, match="must point at its own class"):
+        lore.compile()
+
+
+def test_symmetric_with_inverse_of_raises():
+    lore = Lore("t")
+
+    @lore.entity
+    class Node(Entity):
+        peer: Relation["Node"] = relation(symmetric=True, inverse_of="peer")
+
+    with pytest.raises(LoreError, match="cannot also declare inverse_of"):
+        lore.compile()
+
+
+def test_inverse_of_own_field_suggests_symmetric():
+    lore = Lore("t")
+
+    @lore.entity
+    class Node(Entity):
+        peer: Relation["Node"] = relation(inverse_of="peer")
+
+    with pytest.raises(LoreError, match="use symmetric=True"):
+        lore.compile()
+
+
+def test_asymmetric_implies_irreflexive():
+    lore = Lore("t")
+
+    @lore.entity
+    class Node(Entity):
+        beats: Relation["Node"] = relation(asymmetric=True)
+
+    guard = lore.compile()
+    assert guard.relations["Node.beats"].irreflexive is True
+
+
+def test_inverse_of_missing_field_raises():
+    lore = Lore("t")
+
+    @lore.entity
+    class Customer(Entity):
+        pass
+
+    @lore.entity
+    class Order(Entity):
+        placed_by: Relation[Customer] = relation(inverse_of="placed")
+
+    with pytest.raises(LoreError, match="no relation field named 'placed'"):
+        lore.compile()
+
+
+def test_inverse_of_non_relation_field_raises():
+    lore = Lore("t")
+
+    @lore.entity
+    class Customer(Entity):
+        name: str
+
+    @lore.entity
+    class Order(Entity):
+        placed_by: Relation[Customer] = relation(inverse_of="name")
+
+    with pytest.raises(LoreError, match="no relation field named 'name'"):
+        lore.compile()
+
+
+def test_inverse_of_mismatched_target_raises():
+    lore = Lore("t")
+
+    @lore.entity
+    class Customer(Entity):
+        pass
+
+    @lore.entity
+    class Order(Entity):
+        placed_by: Relation[Customer]
+
+    @lore.entity
+    class Refund(Entity):
+        # Order.placed_by points at Customer, not Refund — not a real inverse.
+        refunds: Relation[Order] = relation(inverse_of="placed_by")
+
+    with pytest.raises(LoreError, match="opposite directions"):
+        lore.compile()
+
+
+def test_one_sided_inverse_completes_the_pair():
+    lore = Lore("t")
+
+    @lore.entity
+    class Customer(Entity):
+        placed: Relation["Order"] | None = relation(default=None)
+
+    @lore.entity
+    class Order(Entity):
+        placed_by: Relation[Customer] = relation(inverse_of="placed")
+
+    guard = lore.compile()
+    assert guard.inverses == {
+        "Order.placed_by": "Customer.placed",
+        "Customer.placed": "Order.placed_by",
+    }
+
+
+def test_two_sided_inverse_must_agree():
+    lore = Lore("t")
+
+    @lore.entity
+    class Customer(Entity):
+        placed: Relation["Order"] | None = relation(inverse_of="approved_by", default=None)
+
+    @lore.entity
+    class Order(Entity):
+        placed_by: Relation[Customer] = relation(inverse_of="placed")
+        approved_by: Relation[Customer] | None = relation(default=None)
+
+    with pytest.raises(LoreError, match="at most one inverse"):
+        lore.compile()
+
+
+def test_two_fields_claiming_the_same_inverse_raises():
+    lore = Lore("t")
+
+    @lore.entity
+    class Customer(Entity):
+        placed: Relation["Order"] | None = relation(default=None)
+
+    @lore.entity
+    class Order(Entity):
+        placed_by: Relation[Customer] = relation(inverse_of="placed")
+        billed_to: Relation[Customer] = relation(inverse_of="placed")
+
+    with pytest.raises(LoreError, match="at most one inverse"):
+        lore.compile()
+
+
+def test_relation_default_makes_optional_relation_constructible():
+    lore = Lore("t")
+
+    @lore.entity
+    class Target(Entity):
+        pass
+
+    @lore.entity
+    class Node(Entity):
+        linked: Relation[Target] | None = relation(max_per_target=1, default=None)
+
+    lore.compile()
+    assert Node(id="n1").linked is None
+
+
 def test_mro_ancestors_for_registered_subclass():
     lore = Lore("t")
 

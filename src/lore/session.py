@@ -10,10 +10,12 @@ hypotheticals), and partial writes (multi-object proposals land atomically).
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import replace
 from typing import Iterable, Iterator
 
 from .compile import Guard
 from .engine import Graph, _most_specific, ground, run_checks
+from .infer import build_context, derive
 from .schema import Entity, LoreError
 from .store import AttrFact, Fact, FactStore, InMemoryStore, LayeredView, TypeFact
 from .verdict import LoreViolation, Verdict, Violation
@@ -29,7 +31,9 @@ class Session:
     seed plus committed facts: what it doesn't contain doesn't exist.
     """
 
-    def __init__(self, guard: Guard, seed: Iterable[Entity] = ()) -> None:
+    def __init__(
+        self, guard: Guard, seed: Iterable[Entity] = (), *, validate_seed: bool = True
+    ) -> None:
         self._guard = guard
         self._committed = InMemoryStore()
         for obj in seed:
@@ -37,6 +41,23 @@ class Session:
         self._staged: list[Fact] | None = None
         self._staged_store = InMemoryStore()
         self._last_verdict: Verdict | None = None
+        self._step = 0
+        if validate_seed and self._committed.all_facts():
+            self._validate_seed()
+
+    def _validate_seed(self) -> None:
+        """Run the full derive+check pass with every seed fact treated as
+        staged; an inconsistent seed fails loudly instead of silently exempting
+        itself from the lore forever."""
+        seed_facts = list(self._committed.all_facts())
+        verdict = Verdict(run_checks(build_context(self._guard, self._committed, seed_facts)))
+        if verdict.rejects:
+            lines = [
+                f"invalid seed: {len(verdict.rejects)} reject-severity violation(s) "
+                "(pass validate_seed=False to skip this check):"
+            ]
+            lines += [f"  - {v.message}" for v in verdict.rejects]
+            raise LoreError("\n".join(lines))
 
     def propose(self, *objs: Entity) -> Verdict:
         """Stage ``objs`` as hypothetical facts and check the combined graph.
@@ -55,7 +76,10 @@ class Session:
         staged_store = InMemoryStore()
         staged_store.add(staged)
         view = LayeredView(self._committed, staged_store)
-        verdict = Verdict(run_checks(self._guard, view, staged))
+        # Derivations are computed locally per proposal and passed through the
+        # context — never stored on the session, so check()'s save/restore of
+        # (_staged, _staged_store, _last_verdict) stays complete.
+        verdict = Verdict(run_checks(build_context(self._guard, view, staged)))
         self._staged = staged
         self._staged_store = staged_store
         self._last_verdict = verdict
@@ -64,7 +88,10 @@ class Session:
     def commit(self) -> None:
         """Merge the staged facts into the committed graph (atomic).
 
-        Flag-severity violations are committable; rejects are not.
+        Flag-severity violations are committable; rejects are not. Successful
+        non-empty commits are numbered 1, 2, 3… and every fact is stamped with
+        its commit's step (seeds stay at step 0); idempotent re-commits of an
+        empty staged set consume no step number.
         """
         if self._staged is None or self._last_verdict is None:
             raise LoreError("nothing to commit: call propose() first")
@@ -73,7 +100,10 @@ class Session:
             raise LoreError(
                 f"cannot commit: the last verdict has {rejects} reject-severity violation(s)"
             )
-        self._committed.add(self._staged)
+        if self._staged:
+            assert all(f.source != "derived" for f in self._staged)
+            self._step += 1
+            self._committed.add(replace(f, step=self._step) for f in self._staged)
         self._clear_staged()
 
     def rollback(self) -> None:
@@ -149,9 +179,19 @@ class Session:
         """Read-only view over committed ∪ staged — the same API rules receive.
 
         ``graph.get(id)`` rehydrates an entity; ``graph.incoming(id,
-        "Class.field")`` lists the edges pointing at it.
+        "Class.field")`` lists the edges pointing at it; ``graph.reachable(id,
+        "Class.field")`` follows the relation through mirrors and transitive
+        closure (derivations are recomputed on access — session graphs are
+        tiny).
         """
-        return Graph(self._guard, LayeredView(self._committed, self._staged_store))
+        view = LayeredView(self._committed, self._staged_store)
+        derivations = derive(self._guard, view)
+        return Graph(
+            self._guard,
+            view,
+            mirrors=LayeredView(derivations.sym_mirrors, derivations.inv_mirrors),
+            closure=derivations.closure,
+        )
 
     def dump(self) -> str:
         """The session's world as readable text, grouped by entity::

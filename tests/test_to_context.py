@@ -78,5 +78,33 @@ def test_to_context_marks_flag_severity_constraints_as_advisory():
     )
 
 
+def test_to_context_renders_relation_characteristics():
+    hr = Lore("hr-ctx")
+
+    @hr.entity
+    class Employee(Entity):
+        reports_to: Relation["Employee"] | None = relation(
+            transitive=True, irreflexive=True, default=None
+        )
+        married_to: Relation["Employee"] | None = relation(symmetric=True, default=None)
+        outranks: Relation["Employee"] | None = relation(
+            asymmetric=True, severity="flag", default=None
+        )
+        manages: Relation["Employee"] | None = relation(inverse_of="reports_to", default=None)
+
+    text = hr.to_context()
+    assert "- If A 'reports_to' B and B 'reports_to' C, then A 'reports_to' C." in text
+    assert (
+        "- Nothing can be its own 'reports_to', directly or through a chain of "
+        "'reports_to' links — no cycles." in text
+    )
+    assert "- If A 'married_to' B, then B 'married_to' A — two directions of the same fact." in text
+    assert "- If A 'outranks' B, then B cannot 'outranks' A. (advisory: flagged, not rejected)" in text
+    assert "- Nothing can be its own 'outranks'." in text  # implied by asymmetric
+    inverse_line = "- 'Employee.manages' and 'Employee.reports_to' are two directions of the same fact."
+    assert inverse_line in text
+    assert text.count(inverse_line) == 1  # rendered once per pair, not per direction
+
+
 def test_py_typed_marker_ships_with_the_package():
     assert (Path(lore_pkg.__file__).parent / "py.typed").is_file()

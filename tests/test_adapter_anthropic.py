@@ -61,7 +61,7 @@ def test_guard_tool_rejection_is_error_with_zero_trace():
     before = session.facts
     content, is_error = issue_refund("ord_1")  # ord_1 is already refunded
     assert is_error
-    assert "ord_1 has 2: ref_1 (already committed), ref_2 (proposed)" in content
+    assert "ord_1 has 2: ref_1 (seeded), ref_2 (proposed)" in content
     assert ledger == []  # the effect never ran
     assert session.facts == before and session.staged_facts == ()
 

@@ -11,7 +11,10 @@ lore = Lore("commerce-test")
 
 @lore.entity
 class Customer(Entity):
-    pass
+    # One-sided inverse declaration: completed against Order.placed_by. The
+    # seeds give cust_1 several orders, so this also exercises "inverse
+    # mirrors don't fire single_value on the many side".
+    placed: Relation["Order"] | None = relation(inverse_of="placed_by", default=None)
 
 
 @lore.entity
@@ -39,6 +42,23 @@ class Refund(Entity):
     paid_to: Relation[Customer]
 
 
+@lore.entity
+class Employee(Entity):
+    reports_to: Relation["Employee"] | None = relation(
+        transitive=True, irreflexive=True, default=None
+    )
+    married_to: Relation["Employee"] | None = relation(symmetric=True, default=None)
+    outranks: Relation["Employee"] | None = relation(asymmetric=True, default=None)
+    badge: Relation["Badge"] | None = relation(
+        max_per_target=1, inverse_of="holder", default=None
+    )
+
+
+@lore.entity
+class Badge(Entity):
+    holder: Relation[Employee] | None = relation(inverse_of="badge", default=None)
+
+
 @lore.rule(message="Refund {obj.id} of {obj.amount} exceeds the total of order {obj.refunds}.")
 def refund_within_total(refund: Refund, graph) -> bool:
     order = graph.get(refund.refunds)
@@ -64,6 +84,10 @@ def make_session(committed=()):
             SupportRep(id="rep_1"),
             order("ord_1", total=100.0),
             order("ord_2", total=250.0),
+            Employee(id="emp_1"),
+            Employee(id="emp_2"),
+            Employee(id="emp_3"),
+            Badge(id="b_1"),
         ]
     )
     for batch in committed:
@@ -166,6 +190,98 @@ CASES = [
         {("single_value", ("ref_a",))},
         False,
     ),
+    # --- inference-backed checks (transitive / symmetric / asymmetric / inverse)
+    (
+        "irreflexive-direct-self-edge",
+        [],
+        [Employee(id="emp_x", reports_to="emp_x")],
+        {("irreflexive", ("emp_x",))},
+        False,
+    ),
+    (
+        "transitive-chain-without-cycle-passes",
+        [],
+        [Employee(id="emp_a", reports_to="emp_1"), Employee(id="emp_b", reports_to="emp_a")],
+        set(),
+        True,
+    ),
+    (
+        # A 2-cycle derives a self-edge per node; dedupe by base-fact set means
+        # one cycle = one violation.
+        "irreflexive-cycle-one-violation",
+        [[Employee(id="emp_b"), Employee(id="emp_a", reports_to="emp_b")]],
+        [Employee(id="emp_b", reports_to="emp_a")],
+        {("irreflexive", ("emp_a", "emp_b"))},
+        False,
+    ),
+    (
+        "irreflexive-three-node-cycle-one-violation",
+        [
+            [
+                Employee(id="emp_c"),
+                Employee(id="emp_b", reports_to="emp_c"),
+                Employee(id="emp_a", reports_to="emp_b"),
+            ]
+        ],
+        [Employee(id="emp_c", reports_to="emp_a")],
+        {("irreflexive", ("emp_a", "emp_b", "emp_c"))},
+        False,
+    ),
+    (
+        "asymmetric-cross-turn",
+        [[Employee(id="emp_1", outranks="emp_2")]],
+        [Employee(id="emp_2", outranks="emp_1")],
+        {("asymmetric", ("emp_1", "emp_2"))},
+        False,
+    ),
+    (
+        # asymmetric implies irreflexive at compile; the self-edge is the
+        # irreflexive check's job and asymmetric must not double-fire.
+        "asymmetric-self-edge-fires-irreflexive",
+        [],
+        [Employee(id="emp_x", outranks="emp_x")],
+        {("irreflexive", ("emp_x",))},
+        False,
+    ),
+    (
+        # "emp_2 married to both emp_1 and emp_3", both facts asserted from the
+        # other side — only visible through symmetric mirrors.
+        "symmetric-single-value-cross-direction",
+        [[Employee(id="emp_1", married_to="emp_2")]],
+        [Employee(id="emp_3", married_to="emp_2")],
+        {("single_value", ("emp_2", "emp_1", "emp_3"))},
+        False,
+    ),
+    (
+        # Asserting both directions of one symmetric fact is redundant, not a
+        # violation: mirrors that duplicate asserted edges are suppressed.
+        "symmetric-both-directions-asserted-ok",
+        [[Employee(id="emp_1", married_to="emp_2")]],
+        [Employee(id="emp_2", married_to="emp_1")],
+        set(),
+        True,
+    ),
+    ("inverse-pair-valid-assertion", [], [Employee(id="emp_1", badge="b_1")], set(), True),
+    (
+        # One-to-one inverse pair enforced cross-direction: the committed edge
+        # was asserted as Employee.badge, the conflicting one as Badge.holder —
+        # the only staged-involved edge in the overrun group is a mirror.
+        "inverse-one-to-one-cross-direction-max-per-target",
+        [[Employee(id="emp_1", badge="b_1")]],
+        [Badge(id="b_1", holder="emp_2")],
+        {("max_per_target", ("b_1", "emp_1", "emp_2"))},
+        False,
+    ),
+    (
+        # Inverse mirrors are NOT counted by single_value: cust_1's seeded
+        # orders mirror onto Customer.placed, and a third must not trip the
+        # scalar-field check on the many side.
+        "inverse-one-to-many-no-false-single-value",
+        [],
+        [order("ord_x")],
+        set(),
+        True,
+    ),
 ]
 
 
@@ -182,7 +298,7 @@ def test_max_per_target_message_names_prior_committed_subject():
     verdict = session.propose(refund("ref_b"))
     (violation,) = verdict.violations
     assert "ord_1" in violation.message
-    assert "ref_a (already committed)" in violation.message
+    assert "ref_a (already committed at step 1)" in violation.message
     assert "ref_b (proposed)" in violation.message
 
 
@@ -191,8 +307,34 @@ def test_single_value_message_names_committed_and_proposed_values():
     verdict = session.propose(refund("ref_a", amount=250.0))
     [violation] = [v for v in verdict.violations if v.check == "single_value"]
     assert "Refund.amount" in violation.message
-    assert "50.0 (already committed)" in violation.message
+    assert "50.0 (already committed at step 1)" in violation.message
     assert "250.0 (proposed)" in violation.message
+
+
+def test_irreflexive_cycle_message_renders_provenance_chain_with_steps():
+    session = make_session(
+        committed=[[Employee(id="emp_b"), Employee(id="emp_a", reports_to="emp_b")]]
+    )
+    verdict = session.propose(Employee(id="emp_b", reports_to="emp_a"))
+    (violation,) = verdict.violations
+    assert violation.message == (
+        "emp_a cannot reach itself via 'reports_to', but this proposal creates a "
+        "cycle: emp_a → emp_b (already committed at step 1) → emp_a (proposed)."
+    )
+    # Provenance carries the base facts of the cycle, in chain order.
+    assert [(f.subject_id, f.object_id) for f in violation.provenance] == [
+        ("emp_a", "emp_b"),
+        ("emp_b", "emp_a"),
+    ]
+
+
+def test_inverse_cross_direction_message_names_both_subjects_with_steps():
+    session = make_session(committed=[[Employee(id="emp_1", badge="b_1")]])
+    verdict = session.propose(Badge(id="b_1", holder="emp_2"))
+    (violation,) = verdict.violations
+    assert "b_1 has 2: emp_1 (already committed at step 1), emp_2 (proposed)" in (
+        violation.message
+    )
 
 
 def test_rules_rerun_when_staged_facts_touch_committed_nodes():

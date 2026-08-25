@@ -3,15 +3,19 @@
 Everything the engine checks is one of three fact shapes, produced by grounding
 entity instances (see ``engine.ground``). Facts are immutable and append-only;
 ``source`` records where a fact came from ("seed" = trusted session setup,
-"asserted" = claimed by the agent), not whether it is committed yet.
+"asserted" = claimed by the agent, "derived" = inferred by ``lore.infer``),
+not whether it is committed yet. ``step`` is the commit that made the fact
+true (0 = seeded; sessions stamp it at commit time). It is ``compare=False``
+so hash/eq ignore it: a stamped fact still equals — and content-dedups
+against — its unstamped original.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Iterable, Literal, Protocol, Union
 
-Source = Literal["seed", "asserted"]
+Source = Literal["seed", "asserted", "derived"]
 
 
 @dataclass(frozen=True)
@@ -21,6 +25,7 @@ class TypeFact:
     node_id: str
     type_name: str
     source: Source
+    step: int = field(default=0, compare=False)
 
 
 @dataclass(frozen=True)
@@ -31,6 +36,7 @@ class EdgeFact:
     predicate: str
     object_id: str
     source: Source
+    step: int = field(default=0, compare=False)
 
 
 @dataclass(frozen=True)
@@ -41,6 +47,7 @@ class AttrFact:
     attr: str
     value: Any
     source: Source
+    step: int = field(default=0, compare=False)
 
 
 Fact = Union[TypeFact, EdgeFact, AttrFact]

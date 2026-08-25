@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Any, Callable, ClassVar, Literal, Sequence
 
 import pydantic
+from pydantic_core import PydanticUndefined
 
 if TYPE_CHECKING:
     from .compile import Guard
@@ -67,7 +68,17 @@ class Relation:
         return Annotated[str, _RelTarget(target)]
 
 
-def relation(*, max_per_target: int | None = None, severity: Severity = "reject") -> Any:
+def relation(
+    *,
+    max_per_target: int | None = None,
+    severity: Severity = "reject",
+    transitive: bool = False,
+    symmetric: bool = False,
+    asymmetric: bool = False,
+    irreflexive: bool = False,
+    inverse_of: str | None = None,
+    default: Any = PydanticUndefined,
+) -> Any:
     """Field options for a ``Relation[...]`` field, used as its default value::
 
         refunds: Relation[Order] = relation(max_per_target=1)
@@ -78,11 +89,53 @@ def relation(*, max_per_target: int | None = None, severity: Severity = "reject"
     field: values are scalar ids, and the ``single_value`` check rejects
     re-asserting a committed subject with a different target.) The explicit
     kwarg avoids the jargon trap.
+
+    The relation characteristics feed the inference pass — derived edges are
+    checked but never committed, and every derived violation renders the base
+    facts that produced it:
+
+    - ``transitive`` — if A→B and B→C then A→C. Closure edges count toward no
+      cardinality check.
+    - ``symmetric`` — each edge implies its flip on the same predicate (the
+      relation must point at its own class). Mirror edges count toward
+      ``max_per_target`` and ``single_value``.
+    - ``asymmetric`` — if A→B then B→A is a violation. Implies ``irreflexive``.
+    - ``irreflexive`` — no self-edges. With ``transitive`` this rejects cycles:
+      a proposal that closes a loop derives a self-edge, and the violation
+      message renders the exact chain.
+    - ``inverse_of`` — the name of a field on the *target* class that states
+      the same fact in the other direction; each asserted edge derives its
+      mirror on the paired predicate. Both fields must be declared, and a
+      one-sided declaration completes the pair. Characteristics do not
+      propagate across the pair — declare them on both sides if both need
+      them. Mirror edges count toward ``max_per_target`` but not
+      ``single_value`` (an inverse mirror is already counted on its home
+      predicate), so a one-to-one pair needs ``max_per_target=1`` on one side
+      to be enforced cross-direction.
+
+    ``default`` passes through to ``pydantic.Field`` — use ``default=None``
+    to make an optional relation (``Relation[X] | None``) constructible
+    without the field.
+
+    Note: ``@lore.rule`` functions on committed nodes re-run only when a
+    staged fact touches the node directly, not when only its derived
+    neighborhood changes — sound for monotone rules (e.g. approver-in-chain:
+    chains only ever grow).
     """
     return pydantic.Field(
+        default=default,
         json_schema_extra={
-            "lore": {"kind": "relation", "max_per_target": max_per_target, "severity": severity}
-        }
+            "lore": {
+                "kind": "relation",
+                "max_per_target": max_per_target,
+                "severity": severity,
+                "transitive": transitive,
+                "symmetric": symmetric,
+                "asymmetric": asymmetric,
+                "irreflexive": irreflexive,
+                "inverse_of": inverse_of,
+            }
+        },
     )
 
 

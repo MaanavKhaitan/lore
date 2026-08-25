@@ -3,12 +3,16 @@
 > **Purpose of this doc:** complete context handoff for agents (and humans) joining this
 > project with zero prior knowledge. It captures the idea, the market research, every
 > settled design decision (with rationale), the v1 scope, and the open questions.
-> Last updated: 2026-08-24. Status: **Milestone 1 (vertical slice) implemented**,
-> plus a DX pass (2026-08-24): `check`/`try_commit`/`guarded()` session API +
-> `LoreViolation`, Anthropic adapter, `to_context()` (resolves open question
-> 11), exported `Graph` for typed rules, session inspection (`dump()`,
-> `session.graph`, reprs), `py.typed`.
-> See §5 Milestones; code lives in `src/lore/`, demos in `examples/commerce/`.
+> Last updated: 2026-08-24. Status: **Milestones 1 and 2 implemented**.
+> Milestone 1 (vertical slice) plus a DX pass (2026-08-24):
+> `check`/`try_commit`/`guarded()` session API + `LoreViolation`, Anthropic
+> adapter, `to_context()` (resolves open question 11), exported `Graph` for
+> typed rules, session inspection (`dump()`, `session.graph`, reprs),
+> `py.typed`. Milestone 2 (2026-08-24): the inference layer — relation
+> characteristics, provenance-carrying derived facts, cycle detection, commit
+> step numbers, seed validation, `graph.reachable()` (see §4.11 and §5).
+> See §5 Milestones; code lives in `src/lore/`, demos in `examples/commerce/`
+> and `examples/hr/`.
 > Name: **`lore`** (chosen 2026-08-24, renamed from the `ontic` placeholder). The
 > `lore` dist name on PyPI is held by Instacart's abandoned ML framework, so the
 > distribution name is **`agent-lore`** (import stays `lore`); not yet published.
@@ -236,13 +240,50 @@ Framework SDKs: optional extras. Tests: pytest + hypothesis. Engine built from s
 differentiators).
 
 ### 4.10 Testing strategy
-- Table-driven per-axiom cases + Hypothesis property tests (e.g. "adding a second
-  `refunds` edge always yields exactly one functional violation").
+- Table-driven per-axiom cases + Hypothesis property tests (e.g. "adding a
+  second `refunds` edge always yields exactly one functional violation").
 - **Deferred but designed-for**: SHACL/OWL export + pySHACL as a *differential-testing
   oracle* in CI (our engine and pySHACL-on-exported-shapes must agree on which
   violations exist; disagreement = bug somewhere). Deferred because for 6 axiom types
   the exporter costs as much as the engine; keep test cases table-driven so the oracle
   bolts on later. Export also doubles as an interop feature eventually.
+
+### 4.11 Inference layer (Milestone 2, settled 2026-08-24)
+Relation characteristics on `relation()`: `transitive`, `symmetric`,
+`asymmetric` (implies irreflexive), `irreflexive`, `inverse_of` (names a field
+on the *target* class; one-sided declarations complete the pair; the finished
+map must be an involution). Contradictory combos are compile errors
+(symmetric∧asymmetric; symmetric∧transitive∧(irreflexive∨asymmetric);
+symmetric requires owner == target; self-inverse → "use symmetric=True";
+symmetric∧inverse_of). Decisions, with rationale in the M2 plan:
+1. **Cardinality vs derived edges** — transitive-closure edges count toward NO
+   cardinality check (OWL precedent). Mirror edges count toward
+   `max_per_target`; `single_value` counts symmetric mirrors (same predicate)
+   but NOT inverse mirrors (already counted on their home predicate;
+   one-to-many pairs would false-positive). Consequence: one-to-one inverse
+   pairs need `max_per_target=1` on one side to be enforced cross-direction.
+2. **Entity rehydration reads asserted facts only**; rules reach the derived
+   layer via `graph.reachable(node_id, predicate)` (asserted + same-predicate
+   mirrors + closure).
+3. **Derivations are never session state**: recomputed per propose, passed to
+   checks via `CheckContext`; a derived edge is staged-involved iff any base
+   fact in its provenance path is staged.
+4. **Provenance**: flattened path of base facts per derived edge,
+   first/shortest path kept, recomputed every propose, never committed. One
+   cycle = one violation (self-edges deduped by base-fact set) and the message
+   renders the chain: *"emp_9 cannot reach itself via 'reports_to', but this
+   proposal creates a cycle: emp_9 → mgr_2 (already committed at step 2) →
+   ceo (already committed at step 1) → emp_9 (proposed)."*
+5. **Step counter**: successful non-empty commits are numbered 1, 2, 3… and
+   facts stamped at commit (seeds = step 0; `step` is compare=False so dedup
+   ignores it). Messages render "(already committed at step N)" /
+   "(seeded)" / "(proposed)".
+6. **Seed validation**: `Session.__init__` runs the full derive+check pass
+   treating all seed facts as staged and raises `LoreError` on rejects;
+   `validate_seed=False` opts out.
+7. Characteristics do NOT propagate across inverse pairs; closure edges are
+   not mirrored; rules on committed nodes don't re-run when only their derived
+   neighborhood changes (sound for monotone rules like approver-in-chain).
 
 ---
 
@@ -272,11 +313,14 @@ lore/
 │   ├── compile.py         # ontology self-check (contradictory axioms, unknown
 │   │                      #   targets — fail loudly like Pydantic) + axioms→checks
 │   ├── store.py           # FactStore protocol + InMemoryStore + fact types
-│   ├── engine.py          # ground, 3 inference fns (w/ provenance), checks
+│   ├── engine.py          # ground + the checks
+│   ├── infer.py           # derive (mirrors, closure, provenance), CheckContext  [M2]
+│   ├── graph.py           # Graph (get/incoming/reachable)  [split from engine, M2]
 │   ├── session.py         # propose/commit, Verdict, Violation, repair_prompt()
 │   └── adapters/pydantic_ai.py
 ├── tests/                 # table-driven axiom cases + hypothesis properties
 ├── examples/commerce/     # the refund demo — README hero
+├── examples/hr/           # approval chains + cycle detection  [M2]
 └── README.md
 ```
 Split a file only past ~500 lines.
@@ -286,8 +330,15 @@ Split a file only past ~500 lines.
    6 checks (existence, domain/range, max_per_target, single_value, one_of, disjoint) +
    `@lore.rule` escape hatch + Verdict/repair prompts + Pydantic AI adapter + refund demo
    + tests. No inference yet. Demos the double-refund catch (`examples/commerce/`).
-2. Inference (transitive/inverse/subclass) + provenance explanations.
-3. Severity/shadow mode polish, session seeding, (maybe) SHACL export + differential CI.
+2. **Inference + provenance** — ✅ implemented 2026-08-24: relation
+   characteristics (`transitive`, `symmetric`, `asymmetric`, `irreflexive`,
+   `inverse_of`) with compile-time contradiction/involution checks, the
+   derive pass (`src/lore/infer.py`) with per-edge provenance, irreflexive +
+   asymmetric checks (cycle detection rendering the exact chain), commit step
+   numbers in messages, seed validation, `graph.reachable()` for rules
+   (`Graph` moved to `src/lore/graph.py`), HR approval-chain example
+   (`examples/hr/`). Design decisions in §4.11.
+3. Severity/shadow mode polish, (maybe) SHACL export + differential CI.
 4. **The benchmark** (see §9 — for a personal project this jumps in priority), MCP
    proxy, fuzzer ("ontology coverage": mutate valid graphs → invalid, measure catch
    rate).
