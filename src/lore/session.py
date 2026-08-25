@@ -21,7 +21,7 @@ from typing import Any, Iterable, Iterator
 from pydantic import TypeAdapter
 
 from .compile import Guard
-from .engine import Graph, _most_specific, ground, run_checks
+from .engine import Graph, _most_specific, ground, run_checks, run_goals
 from .infer import build_context, derive
 from .schema import Entity, LoreError
 from .store import AttrFact, EdgeFact, Fact, FactStore, InMemoryStore, LayeredView, TypeFact
@@ -180,6 +180,31 @@ class Session:
                 "propose/commit/rollback are not allowed there"
             )
         self.commit()
+
+    # --- the output boundary ----------------------------------------------------
+
+    def check_goals(self) -> Verdict:
+        """Run every ``@lore.goal`` on the committed world — "am I done?".
+
+        Rules catch invalid facts per proposal; goals catch *missing* ones, so
+        they run only here, when the agent claims to be finished. Every goal
+        fires once per committed instance of its target class (subclass
+        instances count; zero instances pass vacuously), each receiving the
+        same derived :class:`~lore.graph.Graph` rules see. Zero state change:
+        nothing is staged and the last proposal's verdict is untouched.
+
+        Violations carry ``check="goal:<name>"`` in the ordinary
+        :class:`Verdict`, so ``verdict.ok``, ``.flags``, and
+        ``repair_prompt()`` work unchanged — a goal-only failure renders the
+        boundary-appropriate "The work is not finished" prompt. Finishing with
+        an uncommitted proposal is a bug, so pending staged facts raise — the
+        same turn-boundary discipline as :meth:`snapshot`.
+        """
+        if self._staged is not None:
+            raise LoreError(
+                "cannot check goals with a pending proposal: commit() or rollback() first"
+            )
+        return Verdict(run_goals(self._guard, self._committed))
 
     # --- persistence -----------------------------------------------------------
 

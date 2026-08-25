@@ -4,7 +4,7 @@
 import/startup time): unknown relation targets, unresolvable forward refs,
 impossible disjointness, empty ``one_of``, nonsensical cardinalities. What
 survives is a ``Guard``: an immutable bundle of class registry, relation/attr
-specs, disjoint pairs, and rules that sessions and checks read from.
+specs, disjoint pairs, rules, and goals that sessions and checks read from.
 """
 
 from __future__ import annotations
@@ -63,6 +63,12 @@ class RuleSpec:
 
 
 @dataclass(frozen=True)
+class GoalSpec(RuleSpec):
+    """A compiled goal: same anatomy as a rule, but run only by
+    ``Session.check_goals()`` at the output boundary, never per proposal."""
+
+
+@dataclass(frozen=True)
 class CompiledClass:
     cls: type[Entity]
     ancestors: tuple[str, ...]  # registered ancestor names in MRO order, self first
@@ -82,6 +88,7 @@ class Guard:
         disjoint_pairs: tuple[tuple[str, str], ...],
         rules: tuple[RuleSpec, ...],
         inverses: dict[str, str] | None = None,
+        goals: tuple[GoalSpec, ...] = (),
     ) -> None:
         self.name = name
         self.classes = classes
@@ -90,6 +97,7 @@ class Guard:
         self.disjoint_pairs = disjoint_pairs
         self.rules = rules
         self.inverses = inverses or {}  # predicate → inverse predicate, both directions
+        self.goals = goals
         self._fingerprint: str | None = None
 
     @property
@@ -99,13 +107,13 @@ class Guard:
         Two independently defined lores with identical declarations produce
         the same fingerprint; any semantic change (classes, ancestry,
         relation/attribute options, attribute field types, severities,
-        disjointness, rule registrations) produces a different one — attr
-        values round-trip through their annotations, so a changed annotation
-        would otherwise silently coerce restored values. Session snapshots are
-        stamped with it and ``restore`` refuses a mismatch. Caveat:
-        ``@lore.rule`` function *bodies* are not hashed — only their
-        name/message/severity/target — so renaming a rule invalidates old
-        snapshots, but silently editing its logic does not.
+        disjointness, rule and goal registrations) produces a different one —
+        attr values round-trip through their annotations, so a changed
+        annotation would otherwise silently coerce restored values. Session
+        snapshots are stamped with it and ``restore`` refuses a mismatch.
+        Caveat: ``@lore.rule``/``@lore.goal`` function *bodies* are not
+        hashed — only their name/message/severity/target — so renaming one
+        invalidates old snapshots, but silently editing its logic does not.
         """
         if self._fingerprint is None:
             spec = {
@@ -147,6 +155,11 @@ class Guard:
                 "disjoint": [list(pair) for pair in self.disjoint_pairs],
                 "rules": [[r.name, r.message, r.severity, r.target] for r in self.rules],
             }
+            if self.goals:
+                # Included only when goals exist, so goal-less lores keep their
+                # pre-goal fingerprints (and snapshots) — same pattern as the
+                # relations' "many" marker above.
+                spec["goals"] = [[g.name, g.message, g.severity, g.target] for g in self.goals]
             digest = hashlib.sha256(
                 json.dumps(spec, sort_keys=True, separators=(",", ":")).encode()
             ).hexdigest()
@@ -179,8 +192,8 @@ class Guard:
         Prevention to the session's detection: paste this into the agent's
         prompt so it knows the rules before violating them (and so
         context-only vs validation-only vs both can be compared). Output is
-        deterministic — classes and fields in declaration order, rules in
-        registration order.
+        deterministic — classes and fields in declaration order, rules and
+        goals in registration order.
         """
         lines = [
             f"You are operating in the domain '{self.name}'. The entity classes and "
@@ -255,6 +268,11 @@ class Guard:
         for rule in self.rules:
             template = rule.message.replace("{obj.", "{")
             lines.append(f"- Never: {template}{_advisory(rule.severity)}")
+        if self.goals:
+            lines += ["", "Goals — checked when you finish:"]
+            for goal in self.goals:
+                template = goal.message.replace("{obj.", "{")
+                lines.append(f"- Never finish while: {template}{_advisory(goal.severity)}")
         return "\n".join(lines)
 
 
@@ -493,25 +511,37 @@ def compile_lore(lore: Lore) -> Guard:
 
     rules: list[RuleSpec] = []
     for raw in lore._rules:
-        target_name = _resolve_rule_target(raw, registry)
+        target_name = _resolve_rule_target(raw, registry, "rule")
         rules.append(RuleSpec(raw.name, raw.fn, raw.message, raw.severity, target_name))
 
+    goals: list[GoalSpec] = []
+    for raw in lore._goals:
+        target_name = _resolve_rule_target(raw, registry, "goal")
+        goals.append(GoalSpec(raw.name, raw.fn, raw.message, raw.severity, target_name))
+
     return Guard(
-        lore.name, classes, relations, attributes, tuple(sorted(pairs)), tuple(rules), inverses
+        lore.name,
+        classes,
+        relations,
+        attributes,
+        tuple(sorted(pairs)),
+        tuple(rules),
+        inverses,
+        tuple(goals),
     )
 
 
-def _resolve_rule_target(raw: _RawRule, registry: dict[str, type[Entity]]) -> str:
+def _resolve_rule_target(raw: _RawRule, registry: dict[str, type[Entity]], kind: str) -> str:
     target = raw.target
     if isinstance(target, str):
         if target not in registry:
             raise LoreError(
-                f"rule {raw.name!r} targets {target!r}, which is not a registered entity class"
+                f"{kind} {raw.name!r} targets {target!r}, which is not a registered entity class"
             )
         return target
     if isinstance(target, type) and registry.get(target.__name__) is target:
         return target.__name__
     raise LoreError(
-        f"rule {raw.name!r}: first-parameter annotation {target!r} is not a registered "
+        f"{kind} {raw.name!r}: first-parameter annotation {target!r} is not a registered "
         "entity class"
     )

@@ -13,7 +13,8 @@ source). The deal memo deliberately pushes the agent into the traps — Texas
 governing law, a $5,000 liability cap, an MFN commitment. Walk-away terms
 come back as repair-prompt rejections the agent corrects; the MFN clause
 commits *with an escalation* the agent must carry into its final report; the
-report itself is re-proposed against the session and swept for completeness.
+report itself is re-proposed against the session and checked against the
+playbook's completeness goals (session.check_goals()).
 
 Run:  python examples/contracts/live_agent.py
 Needs ANTHROPIC_API_KEY (env var, or a repo-root .env). Drafting transcripts
@@ -378,7 +379,7 @@ def check_final_output(report: dict) -> str | None:
     Every claimed section, term, and clause is rebuilt as its exact typed
     entity and re-proposed. Claims matching committed facts stage nothing; a
     claim that stages new facts was never drafted, and a claim that draws
-    violations contradicts the playbook outright. Then the completeness sweep
+    violations contradicts the playbook outright. Then the completeness goals
     ("at least one X" — only checkable when the agent claims to be done) and
     the escalation roster run at the same boundary.
     """
@@ -423,26 +424,11 @@ def check_final_output(report: dict) -> str | None:
             "exact ids and values they returned."
         )
 
-    # The completeness sweep from the offline demo, at the output boundary.
-    graph = session.graph
-
-    def drafted(predicate: str) -> list:
-        return [graph.get(e.subject_id) for e in graph.incoming("contract_1", predicate)]
-
-    fees = drafted("FeeClause.for_contract")
-    caps = drafted("LiabilityCapClause.caps")
-    sweep = [
-        ("exactly one governing-law clause", len(drafted("GoverningLawClause.governs")) == 1),
-        ("at least one fee clause", len(fees) >= 1),
-        ("at least one liability-cap clause", len(caps) >= 1),
-        (
-            "every liability cap covering 12 months of every fee",
-            all(cap.cap_cents >= 12 * fee.monthly_fee_cents for cap in caps for fee in fees),
-        ),
-    ]
-    problems += [
-        f"The drafted contract is incomplete: it needs {item}." for item, ok in sweep if not ok
-    ]
+    # The completeness goals declared in world.py, checked at the output
+    # boundary — the graph-level half of this check. The fabrication check
+    # above and the escalation roster below read report/harness state the
+    # graph does not hold, so they stay hand-rolled.
+    problems += [v.message for v in session.check_goals().rejects]
 
     reported = {e["clause_id"] for e in report["escalations_for_counsel"]}
     missing = [cid for cid in ESCALATED if cid not in reported]

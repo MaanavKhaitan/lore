@@ -6,8 +6,8 @@ playbook deviation — invented clauses, undefined or silently-redefined terms,
 an off-playbook forum, a duplicate governing-law clause, a sub-floor liability
 cap, self-indemnification, circular sections — is caught deterministically,
 with the repair prompt that would be fed back. Walk-away terms reject; the
-MFN escalation commits with a flag; a final completeness sweep checks what no
-per-proposal rule can.
+MFN escalation commits with a flag; session.check_goals() checks at the
+output boundary what no per-proposal rule can.
 
 Run:  python examples/contracts/demo.py
 """
@@ -71,7 +71,8 @@ def submit(*objs):
 
 beat(1, "The playbook, rendered")
 print("    guard.to_context() renders the playbook as prompt English — this same")
-print("    declaration is the system prompt AND the enforcement below. The rules:")
+print("    declaration is the system prompt AND the enforcement below. The rules")
+print("    and goals:")
 context = guard.to_context()
 for line in context[context.index("Rules:") :].splitlines():
     print(f"      {line}")
@@ -177,6 +178,10 @@ submit(
     )
 )
 
+# The draft as it stands here — governing law settled, no fees or cap yet —
+# kept for beat 12's premature-finish counterfactual.
+mid_draft = session.snapshot()
+
 beat(8, "The fee clause; then a liability cap below the 12-month floor")
 # Fee before cap: natural drafting order, and enforced — a cap proposed
 # before any fee clause is rejected outright (liability_cap_follows_fee_schedule
@@ -242,30 +247,15 @@ submit(
     Section(id="sec_3", heading="Term and Termination", parent_section="sec_2"),
 )
 
-beat(12, "Finalize — the completeness sweep at the output boundary")
-# Deliberately a plain function over session.graph, not a @lore.rule: "at most
-# one X" is checkable per-proposal, but "at least one X" is a completeness
-# property — only false when the agent claims to be done — so it belongs at
-# the output boundary (the same pattern as check_final_output in
-# examples/commerce/live_agent.py). It is also where the cap-vs-fees floor is
-# re-checked over the *final* graph, closing the ordering caveat in world.py.
-graph = session.graph
-
-
-def drafted(predicate: str):
-    return [graph.get(e.subject_id) for e in graph.incoming("contract_1", predicate)]
-
-
-fees = drafted("FeeClause.for_contract")
-caps = drafted("LiabilityCapClause.caps")
-SWEEP = [
-    ("exactly one governing-law clause", len(drafted("GoverningLawClause.governs")) == 1),
-    ("at least one fee clause", len(fees) >= 1),
-    ("at least one liability cap", len(caps) >= 1),
-    (
-        "every cap covers 12 months of every fee",
-        all(cap.cap_cents >= 12 * fee.monthly_fee_cents for cap in caps for fee in fees),
-    ),
-]
-for item, ok in SWEEP:
-    print(f"    {'PASS' if ok else 'FAIL'}  {item}")
+beat(12, "Finalize — session.check_goals() at the output boundary")
+# "At most one X" is a rule — violable by any single proposal. "At least one
+# X" is only false when the agent claims to be done, so the four completeness
+# goals live in world.py as @lore.goal: rendered into the beat-1 prompt
+# (prevention) and checked here by one call (detection), zero state change.
+verdict = session.check_goals()
+print(f"    session.check_goals() on the finished draft: {verdict!r}")
+print()
+print("    Had the agent finished after beat 7 — no fee schedule, no cap —")
+print("    the same call would have fed back:")
+for line in guard.restore(mid_draft).check_goals().repair_prompt().splitlines():
+    print(f"      {line}")

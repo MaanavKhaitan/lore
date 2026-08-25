@@ -23,13 +23,13 @@ from typing import TYPE_CHECKING
 from .graph import Graph, _most_specific
 from .infer import CheckContext, EdgeKey, _edge_key, derive
 from .schema import Entity, LoreError
-from .store import AttrFact, EdgeFact, Fact, LayeredView, Source, TypeFact
+from .store import AttrFact, EdgeFact, Fact, FactStore, LayeredView, Source, TypeFact
 from .verdict import Violation
 
 if TYPE_CHECKING:
     from .compile import Guard
 
-__all__ = ["ALL_CHECKS", "Graph", "ground", "run_checks"]
+__all__ = ["ALL_CHECKS", "Graph", "ground", "run_checks", "run_goals"]
 
 
 def ground(guard: "Guard", obj: Entity, source: Source) -> list[Fact]:
@@ -568,6 +568,46 @@ def check_rules(ctx: CheckContext) -> list[Violation]:
                     check=f"rule:{rule.name}",
                     severity=rule.severity,
                     message=message,
+                    subjects=(node_id,),
+                )
+            )
+    return out
+
+
+def run_goals(guard: "Guard", store: FactStore) -> list[Violation]:
+    """Run ``@lore.goal`` predicates on every instance of each goal's target
+    class in ``store`` — the output-boundary twin of :func:`check_rules`.
+
+    Deliberately not in :data:`ALL_CHECKS`: goals state what must be true when
+    the agent claims to be *done*, so they never run inside a proposal (or
+    during seed validation — a freshly seeded world is legitimately
+    incomplete). ``Session.check_goals`` calls this over the committed store,
+    and each goal receives the same derived :class:`Graph` rules see. A goal
+    over a class with no instances in ``store`` passes vacuously.
+    """
+    derivations = derive(guard, store)
+    graph = Graph(
+        guard,
+        store,
+        mirrors=LayeredView(derivations.sym_mirrors, derivations.inv_mirrors),
+        closure=derivations.closure,
+    )
+    out = []
+    for goal in guard.goals:
+        target_cls = guard.classes[goal.target].cls
+        for node_id in sorted(store.nodes_of(goal.target)):
+            obj = graph.get(node_id)
+            # Same incoherent-node guard as check_rules: a node typed under two
+            # incomparable branches rehydrates as only one of them.
+            if obj is None or not isinstance(obj, target_cls):
+                continue
+            if goal.fn(obj, graph):
+                continue
+            out.append(
+                Violation(
+                    check=f"goal:{goal.name}",
+                    severity=goal.severity,
+                    message=goal.message.format(obj=obj),
                     subjects=(node_id,),
                 )
             )
