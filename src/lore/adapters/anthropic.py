@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import functools
 import json
-from typing import Any, Callable, Sequence
+from typing import Any, Callable
 
-from ..schema import Entity
 from ..session import Session
 from ..verdict import LoreViolation
+from . import as_entities
 
 ToolResult = tuple[str, bool]  # (content, is_error) for a tool_result block
 
@@ -48,9 +48,8 @@ def guard_tool(session: Session) -> Callable[[Callable[..., Any]], Callable[...,
         @functools.wraps(fn)
         def wrapper(*args: Any, **kwargs: Any) -> ToolResult:
             entities, payload = fn(*args, **kwargs)
-            objs: Sequence[Entity] = [entities] if isinstance(entities, Entity) else list(entities)
             try:
-                with session.guarded(*objs):
+                with session.guarded(*as_entities(entities)):
                     content = payload() if callable(payload) else payload
             except LoreViolation as err:
                 return err.repair_prompt, True
