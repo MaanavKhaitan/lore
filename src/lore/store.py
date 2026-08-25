@@ -59,9 +59,12 @@ class FactStore(Protocol):
     def add(self, facts: Iterable[Fact]) -> None: ...
     def has_node(self, node_id: str) -> bool: ...
     def types_of(self, node_id: str) -> set[str]: ...
+    def nodes_of(self, type_name: str) -> set[str]: ...
     def edges(self, predicate: str) -> list[EdgeFact]: ...
     def edges_from(self, subject_id: str, predicate: str) -> list[EdgeFact]: ...
+    def edges_to(self, object_id: str, predicate: str) -> list[EdgeFact]: ...
     def attrs(self, attr: str) -> list[AttrFact]: ...
+    def attrs_of(self, subject_id: str, attr: str) -> list[AttrFact]: ...
 
 
 def _same_edge(a: EdgeFact, b: EdgeFact) -> bool:
@@ -80,7 +83,14 @@ class InMemoryStore:
         self._facts: list[Fact] = []
         self._types: dict[str, set[str]] = {}
         self._edges: dict[str, list[EdgeFact]] = {}
+        # Secondary indexes keyed by (predicate, node) / (attr, node): entity
+        # rehydration and incoming-edge reads are per-node, and rules run them
+        # per target instance — full-list scans would make each propose
+        # quadratic in world size.
+        self._edges_by_subject: dict[tuple[str, str], list[EdgeFact]] = {}
+        self._edges_by_object: dict[tuple[str, str], list[EdgeFact]] = {}
         self._attrs: dict[str, list[AttrFact]] = {}
+        self._attrs_by_subject: dict[tuple[str, str], list[AttrFact]] = {}
 
     def add(self, facts: Iterable[Fact]) -> None:
         for fact in facts:
@@ -89,15 +99,24 @@ class InMemoryStore:
                     continue
                 self._types.setdefault(fact.node_id, set()).add(fact.type_name)
             elif isinstance(fact, EdgeFact):
-                bucket = self._edges.setdefault(fact.predicate, [])
-                if any(_same_edge(e, fact) for e in bucket):
+                bucket = self._edges_by_subject.setdefault(
+                    (fact.predicate, fact.subject_id), []
+                )
+                if any(e.object_id == fact.object_id for e in bucket):
                     continue
                 bucket.append(fact)
+                self._edges.setdefault(fact.predicate, []).append(fact)
+                self._edges_by_object.setdefault(
+                    (fact.predicate, fact.object_id), []
+                ).append(fact)
             elif isinstance(fact, AttrFact):
-                abucket = self._attrs.setdefault(fact.attr, [])
-                if any(a.subject_id == fact.subject_id and a.value == fact.value for a in abucket):
+                abucket = self._attrs_by_subject.setdefault(
+                    (fact.attr, fact.subject_id), []
+                )
+                if any(a.value == fact.value for a in abucket):
                     continue
                 abucket.append(fact)
+                self._attrs.setdefault(fact.attr, []).append(fact)
             else:
                 raise TypeError(f"not a fact: {fact!r}")
             self._facts.append(fact)
@@ -108,14 +127,23 @@ class InMemoryStore:
     def types_of(self, node_id: str) -> set[str]:
         return set(self._types.get(node_id, ()))
 
+    def nodes_of(self, type_name: str) -> set[str]:
+        return {n for n, types in self._types.items() if type_name in types}
+
     def edges(self, predicate: str) -> list[EdgeFact]:
         return list(self._edges.get(predicate, ()))
 
     def edges_from(self, subject_id: str, predicate: str) -> list[EdgeFact]:
-        return [e for e in self._edges.get(predicate, ()) if e.subject_id == subject_id]
+        return list(self._edges_by_subject.get((predicate, subject_id), ()))
+
+    def edges_to(self, object_id: str, predicate: str) -> list[EdgeFact]:
+        return list(self._edges_by_object.get((predicate, object_id), ()))
 
     def attrs(self, attr: str) -> list[AttrFact]:
         return list(self._attrs.get(attr, ()))
+
+    def attrs_of(self, subject_id: str, attr: str) -> list[AttrFact]:
+        return list(self._attrs_by_subject.get((attr, subject_id), ()))
 
     def all_facts(self) -> tuple[Fact, ...]:
         """Every fact in insertion order (not part of the FactStore protocol)."""
@@ -143,12 +171,28 @@ class LayeredView:
     def types_of(self, node_id: str) -> set[str]:
         return self._base.types_of(node_id) | self._overlay.types_of(node_id)
 
+    def nodes_of(self, type_name: str) -> set[str]:
+        return self._base.nodes_of(type_name) | self._overlay.nodes_of(type_name)
+
     def edges(self, predicate: str) -> list[EdgeFact]:
         base = self._base.edges(predicate)
         return base + [e for e in self._overlay.edges(predicate) if not any(_same_edge(e, b) for b in base)]
 
     def edges_from(self, subject_id: str, predicate: str) -> list[EdgeFact]:
-        return [e for e in self.edges(predicate) if e.subject_id == subject_id]
+        base = self._base.edges_from(subject_id, predicate)
+        return base + [
+            e
+            for e in self._overlay.edges_from(subject_id, predicate)
+            if not any(_same_edge(e, b) for b in base)
+        ]
+
+    def edges_to(self, object_id: str, predicate: str) -> list[EdgeFact]:
+        base = self._base.edges_to(object_id, predicate)
+        return base + [
+            e
+            for e in self._overlay.edges_to(object_id, predicate)
+            if not any(_same_edge(e, b) for b in base)
+        ]
 
     def attrs(self, attr: str) -> list[AttrFact]:
         base = self._base.attrs(attr)
@@ -156,4 +200,12 @@ class LayeredView:
             a
             for a in self._overlay.attrs(attr)
             if not any(b.subject_id == a.subject_id and b.value == a.value for b in base)
+        ]
+
+    def attrs_of(self, subject_id: str, attr: str) -> list[AttrFact]:
+        base = self._base.attrs_of(subject_id, attr)
+        return base + [
+            a
+            for a in self._overlay.attrs_of(subject_id, attr)
+            if not any(b.value == a.value for b in base)
         ]

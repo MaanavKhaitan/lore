@@ -158,6 +158,9 @@ class Guard:
 
         The seed is checked against the lore by default (``LoreError`` on
         reject-severity violations); pass ``validate_seed=False`` to skip.
+        Skipping means seed inconsistencies are trusted silently — including
+        an id typed under two incomparable classes, which rehydrates as just
+        one of them with the other branch's rules skipped.
         """
         from .session import Session
 

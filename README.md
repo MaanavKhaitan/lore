@@ -291,12 +291,15 @@ self-corrects the other. Costs a few cents per run.
    recomputed per proposal — a rejected proposal's derivations vanish with it.
 3. **Check** — facts are staged in an overlay, never written directly. All
    checks (existence, domain/range, max_per_target, single_value, one_of,
-   disjoint, irreflexive, asymmetric, rules) scan the composed views; only
-   violations involving staged facts (directly or through a derived edge)
-   are reported. Rules re-run on staged subjects *and* every node one
-   asserted hop away, so non-monotone one-hop aggregate rules (a sum over
-   `graph.incoming` reading neighbor attributes) stay safe against stray
-   edges, late-filled optional attributes, and subclass re-typing.
+   disjoint, type_coherence, irreflexive, asymmetric, rules) scan the
+   composed views; only violations caused by staged facts (directly or
+   through a derived edge) are reported. Rules re-run on every instance of their target class:
+   failures on the proposal's own neighborhood always report, and every
+   other committed instance is checked differentially — a proposal that
+   would flip a committed node's rule from satisfied to violated is
+   rejected, naming that node. Committed facts are immutable, so the flip
+   would otherwise be unrepairable; this also means rules never need to be
+   monotone, however far they read.
 4. **Verdict** — violations carry severity (`reject` blocks commit, `flag`
    commits but is surfaced) and render as concrete, id-naming English, with
    step numbers ("already committed at step 2") and derivation chains.

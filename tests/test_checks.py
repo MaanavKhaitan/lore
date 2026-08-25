@@ -412,6 +412,64 @@ def test_seed_inconsistencies_do_not_refire_on_unrelated_proposals():
 # one asserted hop: a stray edge pointing at the node, a late-filled optional
 # attribute on a neighbor, or a subclass re-type of a neighbor.
 
+def _sibling_lore() -> Lore:
+    lore2 = Lore("sibling-test")
+
+    @lore2.entity
+    class Item(Entity):
+        label: str
+
+    @lore2.entity
+    class AItem(Item):
+        a_only: float
+
+    @lore2.entity
+    class BItem(Item):
+        b_only: float
+
+    @lore2.rule(message="BItem {obj.id} exceeds 10.")
+    def b_within_limit(item: BItem, graph) -> bool:
+        return item.b_only <= 10
+
+    return lore2
+
+
+def test_sibling_retype_is_rejected_as_incoherent():
+    # Re-typing a committed id as a sibling subclass — with identical values
+    # for every shared field, so nothing else conflicts — must reject: the
+    # node would rehydrate as only one branch, silently bypassing the other
+    # branch's rules forever (b_within_limit here would never see b_only=99).
+    lore2 = _sibling_lore()
+    AItem, BItem = lore2._classes["AItem"], lore2._classes["BItem"]
+    session = lore2.compile().session()
+    assert session.try_commit(AItem(id="x1", label="widget", a_only=1.0)).ok
+    verdict = session.propose(BItem(id="x1", label="widget", b_only=99.0))
+    assert {(v.check, v.subjects) for v in verdict.violations} == {
+        ("type_coherence", ("x1",))
+    }
+    # With changed shared values, single_value fires alongside it.
+    verdict = session.propose(BItem(id="x1", label="relabeled", b_only=99.0))
+    assert {v.check for v in verdict.violations} == {"type_coherence", "single_value"}
+    # A distinct id — the repair the message asks for — is clean.
+    assert session.try_commit(BItem(id="x2", label="widget", b_only=5.0)).ok
+
+
+def test_preexisting_incoherent_node_neither_crashes_nor_blocks():
+    # A world seeded under two sibling branches (validate_seed=False) is
+    # already lossy — rules on the unpicked branch skip instead of crashing,
+    # and unrelated proposals are not blocked by the pre-existing state.
+    lore2 = _sibling_lore()
+    Item = lore2._classes["Item"]
+    AItem, BItem = lore2._classes["AItem"], lore2._classes["BItem"]
+    session = lore2.compile().session(
+        seed=[AItem(id="x1", label="widget", a_only=1.0),
+              BItem(id="x1", label="widget", b_only=99.0)],
+        validate_seed=False,
+    )
+    verdict = session.try_commit(Item(id="y1", label="fresh"))
+    assert verdict.ok and verdict.violations == []
+
+
 ledger = Lore("ledger-test")
 
 
@@ -512,11 +570,12 @@ def test_dangling_edge_target_reports_existence_without_rule_crash():
     }
 
 
-def test_closure_change_beyond_one_hop_does_not_refire_rules():
-    # Boundary lock-in: re-fire is one *asserted* hop from staged facts. A
-    # staged edge two hops away that changes a committed node's transitive
-    # closure — without any asserted fact within one hop of it — must not
-    # re-run its rules. Changing this boundary should be a deliberate decision.
+def test_closure_change_beyond_one_hop_is_caught_differentially():
+    # The deliberate boundary decision: a staged edge two hops away that flips
+    # a committed node's rule from satisfied to violated is caught — committed
+    # facts are immutable, so letting the flip commit would leave the world
+    # unrepairable. The rejection names the committed node and says the
+    # proposal, not the node, is at fault.
     chain = Lore("closure-boundary-test")
 
     @chain.entity
@@ -526,8 +585,8 @@ def test_closure_change_beyond_one_hop_does_not_refire_rules():
     @chain.rule(message="Node {obj.id} reaches the forbidden node.")
     def a_avoids_forbidden(node: Node, graph) -> bool:
         # Only "a" is constrained, so every node within one hop of the staged
-        # edge below passes trivially — a failure could come only from
-        # re-running the rule on the committed node "a", two hops upstream.
+        # edge below passes trivially — the failure can come only from the
+        # differential re-check of the committed node "a", two hops upstream.
         return node.id != "a" or "bad" not in graph.reachable("a", "Node.next")
 
     session = chain.compile().session()
@@ -535,9 +594,130 @@ def test_closure_change_beyond_one_hop_does_not_refire_rules():
         Node(id="bad"), Node(id="b"), Node(id="m", next="b"), Node(id="a", next="m")
     ).ok
     verdict = session.try_commit(Node(id="b", next="bad"))
+    assert {(v.check, v.subjects) for v in verdict.violations} == {
+        ("rule:a_avoids_forbidden", ("a",))
+    }
+    assert "This rule held before this proposal" in verdict.violations[0].message
+    # The rejected edge left zero trace: a still cannot reach bad.
+    assert "bad" not in session.graph.reachable("a", "Node.next")
+
+
+# A sibling-aggregate lore: caps and fees both point at a plan, and the cap
+# rule reads the fees through the shared target — so a staged fee is two hops
+# from a committed cap, the exact shape the differential re-check exists for.
+wedge = Lore("wedge-test")
+
+
+@wedge.entity
+class Plan(Entity):
+    pass
+
+
+@wedge.entity
+class Fee(Entity):
+    amount: float
+    plan: Relation[Plan]
+
+
+@wedge.entity
+class Cap(Entity):
+    limit: float
+    plan: Relation[Plan]
+
+
+@wedge.rule(message="Cap {obj.id} is below the total of its plan's fees.")
+def cap_covers_fees(cap: Cap, graph) -> bool:
+    fees = [graph.get(e.subject_id) for e in graph.incoming(cap.plan, "Fee.plan")]
+    return cap.limit >= sum(f.amount for f in fees)
+
+
+@wedge.rule(message="Cap {obj.id} is flagged for review above 50.", severity="flag")
+def large_cap_flagged(cap: Cap, graph) -> bool:
+    return cap.limit <= 50.0
+
+
+wedge_guard = wedge.compile()
+
+
+def test_proposal_that_newly_breaks_committed_two_hop_rule_is_rejected():
+    # The wedge shape: the cap committed while it covered the fees; a later fee
+    # would silently put it under water forever (committed facts are
+    # immutable). The fee proposal is rejected instead, naming the cap.
+    session = wedge_guard.session(seed=[Plan(id="plan_1")])
+    assert session.try_commit(Fee(id="fee_1", amount=10.0, plan="plan_1")).ok
+    assert session.try_commit(Cap(id="cap_1", limit=30.0, plan="plan_1")).ok
+    verdict = session.try_commit(Fee(id="fee_2", amount=25.0, plan="plan_1"))
+    assert {(v.check, v.subjects) for v in verdict.violations} == {
+        ("rule:cap_covers_fees", ("cap_1",))
+    }
+    assert "This rule held before this proposal" in verdict.violations[0].message
+    # A fee the cap still covers commits fine.
+    assert session.try_commit(Fee(id="fee_3", amount=15.0, plan="plan_1")).ok
+
+
+def test_preexisting_two_hop_rule_failure_stays_silent():
+    # A world seeded already under water (validate_seed=False) must not block
+    # unrelated proposals: the cap's failure predates them, so the
+    # differential check reports nothing.
+    session = wedge_guard.session(
+        seed=[
+            Plan(id="plan_1"),
+            Fee(id="fee_1", amount=40.0, plan="plan_1"),
+            Cap(id="cap_1", limit=30.0, plan="plan_1"),
+            Plan(id="plan_2"),
+        ],
+        validate_seed=False,
+    )
+    verdict = session.try_commit(Fee(id="fee_2", amount=5.0, plan="plan_2"))
     assert verdict.ok and verdict.violations == []
-    # The closure did change — a now reaches bad — but a's rule stayed silent.
-    assert "bad" in session.graph.reachable("a", "Node.next")
+
+
+def test_newly_broken_flag_rule_flags_and_commits():
+    # Differential reporting respects severity: a staged fact that flips a
+    # committed cap's flag rule surfaces the flag but does not block.
+    session = wedge_guard.session(seed=[Plan(id="plan_1")])
+    assert session.try_commit(Cap(id="cap_1", limit=40.0, plan="plan_1")).ok
+
+    flip = Lore("flag-flip-test")
+
+    @flip.entity
+    class Account(Entity):
+        pass
+
+    @flip.entity
+    class Hold(Entity):
+        amount: float
+        account: Relation[Account]
+
+    @flip.entity
+    class Limit(Entity):
+        ceiling: float
+        account: Relation[Account]
+
+    @flip.rule(message="Limit {obj.id} is exceeded by holds.", severity="flag")
+    def holds_within_limit(limit: Limit, graph) -> bool:
+        holds = [graph.get(e.subject_id) for e in graph.incoming(limit.account, "Hold.account")]
+        return sum(h.amount for h in holds) <= limit.ceiling
+
+    session = flip.compile().session(seed=[Account(id="acct_1")])
+    assert session.try_commit(Limit(id="lim_1", ceiling=20.0, account="acct_1")).ok
+    verdict = session.try_commit(Hold(id="hold_1", amount=25.0, account="acct_1"))
+    assert verdict.ok  # flags commit
+    assert {(v.check, v.severity) for v in verdict.flags} == {
+        ("rule:holds_within_limit", "flag")
+    }
+
+
+def test_committed_always_failing_flag_does_not_refire_beyond_one_hop():
+    # An always-flag rule fires when its subject is proposed; once committed it
+    # must not re-flag on every unrelated proposal (baseline fails too, so the
+    # failure is never "newly broken").
+    session = wedge_guard.session(seed=[Plan(id="plan_1"), Plan(id="plan_2")])
+    verdict = session.propose(Cap(id="cap_big", limit=80.0, plan="plan_1"))
+    assert verdict.ok and len(verdict.flags) == 1  # flagged at proposal
+    session.commit()
+    verdict = session.try_commit(Fee(id="fee_1", amount=1.0, plan="plan_2"))
+    assert verdict.ok and verdict.violations == []
 
 
 def test_target_that_is_also_staged_subject_runs_rules_once():

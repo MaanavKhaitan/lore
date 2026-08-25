@@ -86,7 +86,9 @@ class Session:
         # Derivations are computed locally per proposal and passed through the
         # context — never stored on the session, so check()'s save/restore of
         # (_staged, _staged_store, _last_verdict) stays complete.
-        verdict = Verdict(run_checks(build_context(self._guard, view, staged)))
+        verdict = Verdict(
+            run_checks(build_context(self._guard, view, staged, base=self._committed))
+        )
         self._staged = staged
         self._staged_store = staged_store
         self._last_verdict = verdict
@@ -221,9 +223,12 @@ class Session:
         """Rehydrate a session from a :meth:`snapshot` blob.
 
         The restored facts are trusted as-is (they passed checks when they
-        were committed) — nothing is re-validated. Raises
-        :class:`~lore.schema.LoreError` if the blob is not a snapshot, uses
-        an unknown snapshot format, or was taken under a lore whose
+        were committed) — nothing is re-validated, so anything the blob's
+        session was allowed to hold (e.g. a ``validate_seed=False``
+        inconsistency, such as an id typed under two incomparable classes
+        whose unpicked branch's rules are skipped) carries over silently.
+        Raises :class:`~lore.schema.LoreError` if the blob is not a snapshot,
+        uses an unknown snapshot format, or was taken under a lore whose
         fingerprint differs from ``guard.fingerprint``.
         """
         try:
