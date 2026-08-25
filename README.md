@@ -143,6 +143,10 @@ chain. Run `python examples/hr/demo.py` to see all four verdicts:
 self-manage, cycle, and out-of-chain approvals rejected; a transitively-valid
 CEO approval committed.
 
+`python examples/accounting/demo.py` (no API key) runs the flagship
+production-shaped example: aggregate rules, flags, a one-to-one inverse pair,
+and a session that survives process boundaries.
+
 ## Guard a tool call
 
 `propose`/`commit`/`rollback` is the transactional core; three wrappers cover
