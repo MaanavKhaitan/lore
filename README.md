@@ -90,6 +90,59 @@ of a nonexistent order (`existence`), one id typed as both customer and rep
 (`disjoint`), a bad status (`one_of`) are all caught the same way. Run
 `python examples/commerce/demo.py` to see each verdict — no API key needed.
 
+## Relation characteristics — inference with receipts
+
+Declare *how a relation behaves* and violations are caught across chains
+nobody enumerated:
+
+```python
+lore = Lore("hr")
+
+@lore.entity
+class Employee(Entity):
+    name: str
+    reports_to: Relation["Employee"] | None = relation(
+        transitive=True,     # A→B and B→C imply A→C
+        irreflexive=True,    # nobody is in their own chain
+        default=None,
+    )
+```
+
+That one declaration is cycle detection: a proposed edge that closes a
+reporting loop derives a self-edge, the irreflexive check catches it, and
+the repair prompt renders the exact chain — every derived fact carries
+provenance, the base facts that produced it:
+
+```
+Your output violates 1 rule(s) of this domain:
+  1. emp_9 cannot reach itself via 'reports_to', but this proposal creates a
+     cycle: emp_9 → mgr_2 (already committed at step 2) → ceo (already
+     committed at step 1) → emp_9 (proposed).
+```
+
+The other characteristics: `symmetric=True` mirrors each edge onto its own
+predicate, so "B married to both A and C" is caught even when every fact was
+asserted from the other side; `inverse_of="field"` pairs two fields as two
+directions of one fact, so cardinality holds whichever direction the agent
+asserts (a one-to-one pair wants `max_per_target=1` on one side);
+`asymmetric=True` rejects B→A once A→B holds, and implies `irreflexive`.
+
+Derived edges are checked, never committed, and never leak into entity
+rehydration — rules traverse them explicitly with `graph.reachable()`:
+
+```python
+@lore.rule(message="Expense {obj.id} was approved by {obj.approved_by}, "
+                   "who is not in {obj.filed_by}'s management chain.")
+def approver_in_chain(report: ExpenseReport, graph: Graph) -> bool:
+    return report.approved_by in graph.reachable(report.filed_by, "Employee.reports_to")
+```
+
+The CEO approving a deep report passes without anyone enumerating chains, and
+self-approval fails naturally — irreflexivity keeps you out of your own
+chain. Run `python examples/hr/demo.py` to see all four verdicts:
+self-manage, cycle, and out-of-chain approvals rejected; a transitively-valid
+CEO approval committed.
+
 ## Guard a tool call
 
 `propose`/`commit`/`rollback` is the transactional core; three wrappers cover
@@ -219,36 +272,49 @@ self-corrects the other. Costs a few cents per run.
    type facts (one per class in the MRO, so subclasses satisfy supertype
    constraints), edge facts for relations, attribute facts for scalars.
    Deterministic; no LLM anywhere.
-2. **Check** — facts are staged in an overlay, never written directly. All
+2. **Infer** — mirrors (symmetric and inverse pairs) and transitive closure
+   are derived over committed ∪ staged, each derived edge recording the base
+   facts that produced it. Derived edges are checked, never committed, and
+   recomputed per proposal — a rejected proposal's derivations vanish with it.
+3. **Check** — facts are staged in an overlay, never written directly. All
    checks (existence, domain/range, max_per_target, single_value, one_of,
-   disjoint, rules) scan committed ∪ staged; only violations involving staged
-   facts are reported.
-3. **Verdict** — violations carry severity (`reject` blocks commit, `flag`
-   commits but is surfaced) and render as concrete, id-naming English.
-4. **Repair** — `verdict.ok` gates `session.commit()`; otherwise
+   disjoint, irreflexive, asymmetric, rules) scan the composed views; only
+   violations involving staged facts (directly or through a derived edge)
+   are reported.
+4. **Verdict** — violations carry severity (`reject` blocks commit, `flag`
+   commits but is surfaced) and render as concrete, id-naming English, with
+   step numbers ("already committed at step 2") and derivation chains.
+5. **Repair** — `verdict.ok` gates `session.commit()`; otherwise
    `repair_prompt()` goes back to the agent and the rejected facts vanish —
    a failed attempt leaves **zero trace**, so retries never fire against the
    agent's own earlier mistakes.
 
 Sessions are transactional (propose → check → commit), closed-world over
 their seed plus committed facts, and single-threaded by design: one session
-per agent run. Committed facts are immutable: re-asserting an entity id with
-changed values is itself a violation (`single_value`), never a silent update —
-so an agent can't dodge "refund at most once" by reusing an old refund's id.
+per agent run. Seeds are validated against the lore at session creation
+(`validate_seed=False` to opt out). Committed facts are immutable:
+re-asserting an entity id with changed values is itself a violation
+(`single_value`), never a silent update — so an agent can't dodge "refund at
+most once" by reusing an old refund's id.
 
 ## Status & roadmap
 
-Milestone 1 (this): schema DSL, grounding, in-memory store, 6 axiom checks +
-rule escape hatch, verdicts/repair prompts, Pydantic AI + Anthropic adapters,
+Milestone 1: schema DSL, grounding, in-memory store, 6 axiom checks + rule
+escape hatch, verdicts/repair prompts, Pydantic AI + Anthropic adapters,
 `check`/`try_commit`/`guarded()` session API, `to_context()` prompt rendering,
 durable sessions (`snapshot()`/`restore()` + lore fingerprint), session
-inspection (`dump()`, `session.graph`), commerce example. ~1,700 lines,
-tested (table-driven per-axiom cases + property tests).
+inspection (`dump()`, `session.graph`), commerce example.
 
-Next: inference (transitive/inverse relations) with provenance-backed
-explanations; severity polish; SHACL export as a differential-testing oracle;
-an MCP tool-call proxy; a benchmark for axiom-violation feedback vs generic
-retry. See `CONTEXT.md` for the full design rationale and research.
+Milestone 2 (this): the inference layer — relation characteristics
+(`transitive`, `symmetric`, `asymmetric`, `irreflexive`, `inverse_of`) with
+compile-time contradiction checks, provenance-carrying derived facts,
+irreflexive/asymmetric checks (cycle detection with rendered chains), commit
+step numbers in messages, seed validation, `graph.reachable()`, HR
+approval-chain example. Tested table-driven per axiom + Hypothesis properties.
+
+Next: severity/shadow-mode polish; SHACL export as a differential-testing
+oracle; an MCP tool-call proxy; a benchmark for axiom-violation feedback vs
+generic retry. See `CONTEXT.md` for the full design rationale and research.
 
 Want lore in a framework we don't cover? Adapters are ~30 lines —
 [CONTRIBUTING.md](CONTRIBUTING.md) has the contract and a template.

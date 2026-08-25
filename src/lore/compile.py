@@ -34,6 +34,13 @@ class RelationSpec:
     target: str  # registered target class name (after forward-ref resolution)
     max_per_target: int | None
     severity: Severity
+    # Relation characteristics (inert defaults keep equality stable for
+    # inherited fields). ``asymmetric=True`` implies ``irreflexive=True`` here.
+    transitive: bool = False
+    symmetric: bool = False
+    asymmetric: bool = False
+    irreflexive: bool = False
+    inverse_of: str | None = None  # field name on the *target* class
 
 
 @dataclass(frozen=True)
@@ -73,6 +80,7 @@ class Guard:
         attributes: dict[str, AttrSpec],
         disjoint_pairs: tuple[tuple[str, str], ...],
         rules: tuple[RuleSpec, ...],
+        inverses: dict[str, str] | None = None,
     ) -> None:
         self.name = name
         self.classes = classes
@@ -80,6 +88,7 @@ class Guard:
         self.attributes = attributes  # by attr name
         self.disjoint_pairs = disjoint_pairs
         self.rules = rules
+        self.inverses = inverses or {}  # predicate → inverse predicate, both directions
         self._fingerprint: str | None = None
 
     @property
@@ -102,9 +111,24 @@ class Guard:
                 "lore": self.name,
                 "classes": {name: list(c.ancestors) for name, c in sorted(self.classes.items())},
                 "relations": [
-                    [s.predicate, s.owner, s.field, s.target, s.max_per_target, s.severity]
+                    [
+                        s.predicate,
+                        s.owner,
+                        s.field,
+                        s.target,
+                        s.max_per_target,
+                        s.severity,
+                        s.transitive,
+                        s.symmetric,
+                        s.asymmetric,
+                        s.irreflexive,
+                    ]
                     for _, s in sorted(self.relations.items())
                 ],
+                # The completed pair map, not per-spec inverse_of: declaring an
+                # inverse from either side is the same semantics, so it must be
+                # the same fingerprint.
+                "inverses": sorted(sorted(pair) for pair in self.inverses.items()),
                 "attributes": [
                     [
                         s.attr,
@@ -125,11 +149,15 @@ class Guard:
             self._fingerprint = f"sha256:{digest}"
         return self._fingerprint
 
-    def session(self, seed: Iterable[Entity] = ()) -> "Session":
-        """Open a session, grounding ``seed`` instances as trusted facts."""
+    def session(self, seed: Iterable[Entity] = (), *, validate_seed: bool = True) -> "Session":
+        """Open a session, grounding ``seed`` instances as trusted facts.
+
+        The seed is checked against the lore by default (``LoreError`` on
+        reject-severity violations); pass ``validate_seed=False`` to skip.
+        """
         from .session import Session
 
-        return Session(self, seed=seed)
+        return Session(self, seed=seed, validate_seed=validate_seed)
 
     def restore(self, blob: str | bytes) -> "Session":
         """Rehydrate a session from a :meth:`~lore.session.Session.snapshot`
@@ -182,6 +210,34 @@ class Guard:
                 f"- {article[0].upper()}{article[1:]} can have at most "
                 f"{spec.max_per_target} {spec.owner} pointing at it via "
                 f"'{spec.field}'.{_advisory(spec.severity)}"
+            )
+        for spec in self.relations.values():
+            advisory = _advisory(spec.severity)
+            f = spec.field
+            if spec.transitive:
+                lines.append(f"- If A '{f}' B and B '{f}' C, then A '{f}' C.{advisory}")
+            if spec.symmetric:
+                lines.append(
+                    f"- If A '{f}' B, then B '{f}' A — two directions of the same fact.{advisory}"
+                )
+            if spec.asymmetric:
+                lines.append(f"- If A '{f}' B, then B cannot '{f}' A.{advisory}")
+            if spec.irreflexive:
+                if spec.transitive:
+                    lines.append(
+                        f"- Nothing can be its own '{f}', directly or through a chain "
+                        f"of '{f}' links — no cycles.{advisory}"
+                    )
+                else:
+                    lines.append(f"- Nothing can be its own '{f}'.{advisory}")
+        rendered_pairs: set[frozenset[str]] = set()
+        for predicate, inverse in self.inverses.items():
+            pair = frozenset((predicate, inverse))
+            if pair in rendered_pairs:
+                continue
+            rendered_pairs.add(pair)
+            lines.append(
+                f"- '{predicate}' and '{inverse}' are two directions of the same fact."
             )
         flagged = [f"'{p}'" for p, spec in self.relations.items() if spec.severity == "flag"]
         suffix = f" (advisory for {', '.join(flagged)}: flagged, not rejected)" if flagged else ""
@@ -258,6 +314,79 @@ def _check_severity(value: Any, where: str) -> Severity:
     return value
 
 
+def _check_characteristics(spec: RelationSpec) -> None:
+    """Reject contradictory characteristic combinations at compile time."""
+    p = spec.predicate
+    if spec.symmetric and spec.asymmetric:
+        raise LoreError(f"{p}: a relation cannot be both symmetric and asymmetric")
+    if spec.symmetric and spec.transitive and spec.irreflexive:
+        raise LoreError(
+            f"{p}: symmetric + transitive + irreflexive/asymmetric is unsatisfiable — "
+            "any edge would derive a forbidden self-edge"
+        )
+    if spec.symmetric and spec.target != spec.owner:
+        raise LoreError(
+            f"{p}: a symmetric relation must point at its own class, "
+            f"but the target is {spec.target!r}"
+        )
+    if spec.symmetric and spec.inverse_of is not None:
+        raise LoreError(
+            f"{p}: a symmetric relation cannot also declare inverse_of — "
+            "symmetric already means the fact holds in both directions"
+        )
+    if spec.inverse_of is not None and not isinstance(spec.inverse_of, str):
+        raise LoreError(f"{p}: inverse_of must be a field name string, got {spec.inverse_of!r}")
+
+
+def _complete_inverses(
+    classes: dict[str, CompiledClass], relations: dict[str, RelationSpec]
+) -> dict[str, str]:
+    """Resolve ``inverse_of`` declarations into a predicate→predicate map.
+
+    The field name is looked up on the relation's *target* class, so
+    inheritance lands on the defining predicate. A one-sided declaration
+    completes the pair; the finished map must be an involution — each
+    predicate has at most one inverse and both directions agree.
+    """
+    inverses: dict[str, str] = {}
+    for predicate, spec in relations.items():
+        if spec.inverse_of is None:
+            continue
+        inv_spec = classes[spec.target].relations.get(spec.inverse_of)
+        if inv_spec is None:
+            raise LoreError(
+                f"{predicate}: inverse_of names {spec.inverse_of!r}, but {spec.target} "
+                f"has no relation field named {spec.inverse_of!r} — both fields of an "
+                "inverse pair must be declared"
+            )
+        if inv_spec.predicate == predicate:
+            raise LoreError(
+                f"{predicate}: inverse_of names its own field — use symmetric=True instead"
+            )
+        if inv_spec.symmetric:
+            raise LoreError(
+                f"{predicate}: inverse_of names {inv_spec.predicate!r}, which is symmetric — "
+                "a symmetric relation cannot also have an inverse"
+            )
+        owner_ancestors = classes[spec.owner].ancestors
+        target_ancestors = classes[inv_spec.target].ancestors
+        if spec.owner not in target_ancestors and inv_spec.target not in owner_ancestors:
+            raise LoreError(
+                f"{predicate}: inverse_of names {inv_spec.predicate!r}, but that relation "
+                f"points at {inv_spec.target!r}, not at {spec.owner!r} — the two fields "
+                "do not describe the same pair of classes in opposite directions"
+            )
+        for a, b in ((predicate, inv_spec.predicate), (inv_spec.predicate, predicate)):
+            existing = inverses.get(a)
+            if existing is not None and existing != b:
+                raise LoreError(
+                    f"{a} cannot be the inverse of both {existing!r} and {b!r} — "
+                    "each relation has at most one inverse"
+                )
+            inverses[a] = b
+    return inverses
+
+
 def _add_unique(mapping: dict[str, Any], key: str, spec: Any, kind: str) -> None:
     existing = mapping.get(key)
     if existing is not None and existing != spec:
@@ -299,7 +428,20 @@ def compile_lore(lore: Lore) -> Guard:
                     raise LoreError(
                         f"{predicate}: max_per_target must be an int >= 1, got {max_per_target!r}"
                     )
-                spec = RelationSpec(predicate, owner, field_name, target_name, max_per_target, severity)
+                spec = RelationSpec(
+                    predicate,
+                    owner,
+                    field_name,
+                    target_name,
+                    max_per_target,
+                    severity,
+                    transitive=bool(extra.get("transitive")),
+                    symmetric=bool(extra.get("symmetric")),
+                    asymmetric=bool(extra.get("asymmetric")),
+                    irreflexive=bool(extra.get("irreflexive")) or bool(extra.get("asymmetric")),
+                    inverse_of=extra.get("inverse_of"),
+                )
+                _check_characteristics(spec)
                 _add_unique(relations, predicate, spec, "relation")
                 class_relations[field_name] = spec
             else:
@@ -336,12 +478,16 @@ def compile_lore(lore: Lore) -> Guard:
                 "no instance could ever satisfy this lore"
             )
 
+    inverses = _complete_inverses(classes, relations)
+
     rules: list[RuleSpec] = []
     for raw in lore._rules:
         target_name = _resolve_rule_target(raw, registry)
         rules.append(RuleSpec(raw.name, raw.fn, raw.message, raw.severity, target_name))
 
-    return Guard(lore.name, classes, relations, attributes, tuple(sorted(pairs)), tuple(rules))
+    return Guard(
+        lore.name, classes, relations, attributes, tuple(sorted(pairs)), tuple(rules), inverses
+    )
 
 
 def _resolve_rule_target(raw: _RawRule, registry: dict[str, type[Entity]]) -> str:

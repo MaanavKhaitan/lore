@@ -3,7 +3,7 @@
 
 import pytest
 
-from lore import Entity, Lore, LoreError, LoreViolation, Relation, one_of
+from lore import Entity, Lore, LoreError, LoreViolation, Relation, one_of, relation
 from lore.store import EdgeFact, TypeFact
 
 lore = Lore("session-test")
@@ -106,6 +106,18 @@ def test_reproposing_committed_output_is_ok_and_commit_is_noop():
     assert session.facts == before
 
 
+def test_commits_stamp_facts_with_consecutive_step_numbers():
+    session = guard.session(seed=[Target(id="t1")])
+    session.try_commit(Item(id="i1", name="first", linked="t1"))
+    session.try_commit(Item(id="i2", name="second", linked="t1"))
+    # Idempotent re-commit of already-committed facts stages nothing and must
+    # not consume a step number.
+    session.try_commit(Item(id="i2", name="second", linked="t1"))
+    session.try_commit(Item(id="i3", name="third", linked="t1"))
+    steps = {f.node_id: f.step for f in session.facts if isinstance(f, TypeFact)}
+    assert steps == {"t1": 0, "i1": 1, "i2": 2, "i3": 3}
+
+
 def test_proposing_unregistered_entity_raises():
     class Rogue(Entity):
         pass
@@ -113,6 +125,37 @@ def test_proposing_unregistered_entity_raises():
     session = guard.session()
     with pytest.raises(LoreError, match="not registered"):
         session.propose(Rogue(id="r1"))
+
+
+# --- seed validation ----------------------------------------------------------
+
+
+def test_invalid_seed_raises_listing_violations():
+    with pytest.raises(LoreError, match="invalid seed") as excinfo:
+        guard.session(seed=[Item(id="i1", name="broken", linked="ghost")])
+    assert "i1 refers to ghost via Item.linked" in str(excinfo.value)
+
+
+def test_validate_seed_false_opts_out():
+    session = guard.session(
+        seed=[Item(id="i1", name="broken", linked="ghost")], validate_seed=False
+    )
+    # The blunt closed-world rule still applies afterwards: the pre-existing
+    # inconsistency doesn't re-fire on unrelated proposals.
+    assert session.propose(Item(id="i2", name="fine")).ok
+
+
+def test_seed_validation_runs_inference():
+    lore_hr = Lore("seed-cycle-test")
+
+    @lore_hr.entity
+    class Emp(Entity):
+        boss: Relation["Emp"] | None = relation(transitive=True, irreflexive=True, default=None)
+
+    guard_hr = lore_hr.compile()
+    guard_hr.session(seed=[Emp(id="a"), Emp(id="b", boss="a")])  # acyclic: fine
+    with pytest.raises(LoreError, match="cycle"):
+        guard_hr.session(seed=[Emp(id="a", boss="b"), Emp(id="b", boss="a")])
 
 
 # --- check / try_commit / guarded --------------------------------------------
@@ -224,6 +267,46 @@ def test_session_graph_reads_committed_and_staged():
     assert session.graph.get("i2").name == "draft"  # staged facts are visible
     incoming = session.graph.incoming("t1", "Item.linked")
     assert {e.subject_id for e in incoming} == {"i1", "i2"}
+
+
+def test_session_graph_reachable_follows_mirrors_and_closure():
+    lore_hr = Lore("graph-reachable-test")
+
+    @lore_hr.entity
+    class Emp(Entity):
+        boss: Relation["Emp"] | None = relation(transitive=True, irreflexive=True, default=None)
+        manages: Relation["Emp"] | None = relation(inverse_of="boss", default=None)
+
+    session = lore_hr.compile().session(
+        seed=[Emp(id="ceo"), Emp(id="mgr", boss="ceo"), Emp(id="dev", boss="mgr")]
+    )
+    graph = session.graph
+    assert graph.reachable("dev", "Emp.boss") == {"mgr", "ceo"}
+    assert graph.reachable("ceo", "Emp.boss") == set()
+    # Mirror edges traverse too: ceo manages mgr/dev via the inverse.
+    assert graph.reachable("ceo", "Emp.manages") == {"mgr", "dev"}
+    # get()/incoming() stay pinned to asserted facts — derived edges must not
+    # leak into rehydration.
+    assert graph.get("ceo") == Emp(id="ceo")
+    assert graph.incoming("dev", "Emp.boss") == []
+
+
+def test_check_leaves_no_trace_with_inference_in_play():
+    lore_hr = Lore("check-trace-test")
+
+    @lore_hr.entity
+    class Emp(Entity):
+        boss: Relation["Emp"] | None = relation(transitive=True, irreflexive=True, default=None)
+
+    session = lore_hr.compile().session(seed=[Emp(id="a"), Emp(id="b", boss="a")])
+    pending = session.propose(Emp(id="c", boss="b"))
+    staged_before = session.staged_facts
+    bad = session.check(Emp(id="a", boss="b"))  # would close the a↔b cycle
+    assert [v.check for v in bad.violations] == ["irreflexive"]
+    assert session.staged_facts == staged_before and session.last_verdict is pending
+    session.commit()
+    assert TypeFact("c", "Emp", "asserted") in session.facts
+    assert session._step == 1
 
 
 def test_session_repr_summarizes_state():

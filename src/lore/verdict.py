@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .schema import Severity
+from .store import Fact
 
 
 @dataclass(frozen=True)
@@ -13,6 +14,9 @@ class Violation:
     severity: Severity
     message: str  # fully rendered English, names concrete ids
     subjects: tuple[str, ...] = ()  # node ids involved
+    # For violations found on derived edges: the base facts that produced them
+    # (the chain the message renders). Empty for direct violations.
+    provenance: tuple[Fact, ...] = ()
 
 
 @dataclass

@@ -77,7 +77,7 @@ def test_repair_loop_invalid_then_valid():
         if isinstance(part, RetryPromptPart)
     ]
     assert len(retries) == 1
-    assert "ord_1 has 2: ref_1 (already committed), ref_2 (proposed)" in retries[0].content
+    assert "ord_1 has 2: ref_1 (seeded), ref_2 (proposed)" in retries[0].content
 
     assert result.output == Refund(**VALID_ARGS)
     assert TypeFact("ref_2", "Refund", "asserted") in session.facts  # committed on success

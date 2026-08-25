@@ -67,9 +67,19 @@ def test_restored_session_enforces_cross_turn_rules():
     restored = guard.restore(session.snapshot())
     verdict = restored.propose(Refund(id="ref_2", amount=40.0, refunds="ord_1"))
     assert not verdict.ok
-    assert "ref_1 (already committed)" in verdict.rejects[0].message
+    assert "ref_1 (already committed at step 1)" in verdict.rejects[0].message
     # the verdict is exactly what the pre-snapshot session would have produced
     assert verdict.violations == session.check(Refund(id="ref_2", amount=40.0, refunds="ord_1")).violations
+
+
+def test_round_trip_preserves_commit_steps_and_resumes_the_counter():
+    session = seeded_session()
+    session.try_commit(Refund(id="ref_1", amount=40.0, refunds="ord_1"))
+    restored = guard.restore(session.snapshot())
+    # Fact equality ignores step (compare=False), so check the stamps directly.
+    assert [f.step for f in restored.facts] == [f.step for f in session.facts]
+    assert {f.step for f in restored.facts} == {0, 1}  # seeds at 0, the commit at 1
+    assert restored._step == 1  # the next commit is step 2, not a reused step 1
 
 
 def test_typed_attribute_values_survive_the_round_trip():

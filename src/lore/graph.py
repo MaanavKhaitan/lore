@@ -1,0 +1,98 @@
+"""The read-only session graph handed to rules and ``Session.graph``."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from .store import EdgeFact, FactStore
+
+if TYPE_CHECKING:
+    from .compile import CompiledClass, Guard
+    from .schema import Entity
+
+
+def _most_specific(guard: "Guard", type_names: set[str]) -> "CompiledClass | None":
+    """The most specific registered class among ``type_names`` (most registered
+    ancestors wins; class name breaks ties deterministically)."""
+    candidates = [guard.classes[t] for t in type_names if t in guard.classes]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda c: (-len(c.ancestors), c.cls.__name__))
+    return candidates[0]
+
+
+class Graph:
+    """Read-only view of the session graph.
+
+    This is the object handed to ``@lore.rule`` functions and exposed as
+    ``Session.graph`` — import it from ``lore`` to annotate rule signatures::
+
+        @lore.rule(message="...")
+        def my_rule(refund: Refund, graph: lore.Graph) -> bool: ...
+
+    ``get``/``incoming`` read asserted facts only; ``reachable`` additionally
+    sees derived (mirror and transitive-closure) edges when the graph carries
+    them — that is how rules see inference without derived edges corrupting
+    entity rehydration.
+    """
+
+    def __init__(
+        self,
+        guard: "Guard",
+        view: FactStore,
+        mirrors: FactStore | None = None,
+        closure: FactStore | None = None,
+    ) -> None:
+        self._guard = guard
+        self._view = view
+        self._mirrors = mirrors
+        self._closure = closure
+
+    def get(self, node_id: str) -> "Entity | None":
+        """Rehydrate an entity from its asserted facts (``None`` if the node
+        doesn't exist)."""
+        compiled = _most_specific(self._guard, self._view.types_of(node_id))
+        if compiled is None:
+            return None
+        kwargs: dict[str, object] = {"id": node_id}
+        for field_name, rel in compiled.relations.items():
+            edges = self._view.edges_from(node_id, rel.predicate)
+            if edges:
+                # Newest value wins: staged facts follow committed ones in view
+                # order, so a proposal under check hydrates with its own values.
+                kwargs[field_name] = edges[-1].object_id
+        for field_name, attr in compiled.attributes.items():
+            for fact in self._view.attrs(attr.attr):
+                if fact.subject_id == node_id:
+                    kwargs[field_name] = fact.value  # no break: newest value wins
+        return compiled.cls(**kwargs)
+
+    def incoming(self, node_id: str, predicate: str) -> list[EdgeFact]:
+        """All asserted edges pointing *at* ``node_id`` via ``"ClassName.field"``."""
+        return [e for e in self._view.edges(predicate) if e.object_id == node_id]
+
+    def reachable(self, node_id: str, predicate: str) -> set[str]:
+        """Every node reachable from ``node_id`` via one or more ``predicate``
+        edges — asserted, mirror, and transitive-closure edges alike.
+
+        ``node_id`` itself is included only when it lies on a cycle. This is
+        the traversal API for rules like "the approver must be somewhere in
+        the filer's reports_to chain".
+        """
+        adjacency: dict[str, set[str]] = {}
+        for store in (self._view, self._mirrors, self._closure):
+            if store is None:
+                continue
+            for edge in store.edges(predicate):
+                adjacency.setdefault(edge.subject_id, set()).add(edge.object_id)
+        seen: set[str] = set()
+        frontier = [node_id]
+        while frontier:
+            next_frontier = []
+            for node in frontier:
+                for target in adjacency.get(node, ()):
+                    if target not in seen:
+                        seen.add(target)
+                        next_frontier.append(target)
+            frontier = next_frontier
+        return seen

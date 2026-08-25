@@ -15,12 +15,14 @@ from __future__ import annotations
 
 import json
 from contextlib import contextmanager
+from dataclasses import replace
 from typing import Any, Iterable, Iterator
 
 from pydantic import TypeAdapter
 
 from .compile import Guard
 from .engine import Graph, _most_specific, ground, run_checks
+from .infer import build_context, derive
 from .schema import Entity, LoreError
 from .store import AttrFact, EdgeFact, Fact, FactStore, InMemoryStore, LayeredView, TypeFact
 from .verdict import LoreViolation, Verdict, Violation
@@ -36,7 +38,9 @@ class Session:
     seed plus committed facts: what it doesn't contain doesn't exist.
     """
 
-    def __init__(self, guard: Guard, seed: Iterable[Entity] = ()) -> None:
+    def __init__(
+        self, guard: Guard, seed: Iterable[Entity] = (), *, validate_seed: bool = True
+    ) -> None:
         self._guard = guard
         self._committed = InMemoryStore()
         for obj in seed:
@@ -44,6 +48,23 @@ class Session:
         self._staged: list[Fact] | None = None
         self._staged_store = InMemoryStore()
         self._last_verdict: Verdict | None = None
+        self._step = 0
+        if validate_seed and self._committed.all_facts():
+            self._validate_seed()
+
+    def _validate_seed(self) -> None:
+        """Run the full derive+check pass with every seed fact treated as
+        staged; an inconsistent seed fails loudly instead of silently exempting
+        itself from the lore forever."""
+        seed_facts = list(self._committed.all_facts())
+        verdict = Verdict(run_checks(build_context(self._guard, self._committed, seed_facts)))
+        if verdict.rejects:
+            lines = [
+                f"invalid seed: {len(verdict.rejects)} reject-severity violation(s) "
+                "(pass validate_seed=False to skip this check):"
+            ]
+            lines += [f"  - {v.message}" for v in verdict.rejects]
+            raise LoreError("\n".join(lines))
 
     def propose(self, *objs: Entity) -> Verdict:
         """Stage ``objs`` as hypothetical facts and check the combined graph.
@@ -62,7 +83,10 @@ class Session:
         staged_store = InMemoryStore()
         staged_store.add(staged)
         view = LayeredView(self._committed, staged_store)
-        verdict = Verdict(run_checks(self._guard, view, staged))
+        # Derivations are computed locally per proposal and passed through the
+        # context — never stored on the session, so check()'s save/restore of
+        # (_staged, _staged_store, _last_verdict) stays complete.
+        verdict = Verdict(run_checks(build_context(self._guard, view, staged)))
         self._staged = staged
         self._staged_store = staged_store
         self._last_verdict = verdict
@@ -71,7 +95,10 @@ class Session:
     def commit(self) -> None:
         """Merge the staged facts into the committed graph (atomic).
 
-        Flag-severity violations are committable; rejects are not.
+        Flag-severity violations are committable; rejects are not. Successful
+        non-empty commits are numbered 1, 2, 3… and every fact is stamped with
+        its commit's step (seeds stay at step 0); idempotent re-commits of an
+        empty staged set consume no step number.
         """
         if self._staged is None or self._last_verdict is None:
             raise LoreError("nothing to commit: call propose() first")
@@ -80,7 +107,10 @@ class Session:
             raise LoreError(
                 f"cannot commit: the last verdict has {rejects} reject-severity violation(s)"
             )
-        self._committed.add(self._staged)
+        if self._staged:
+            assert all(f.source != "derived" for f in self._staged)
+            self._step += 1
+            self._committed.add(replace(f, step=self._step) for f in self._staged)
         self._clear_staged()
 
     def rollback(self) -> None:
@@ -162,7 +192,8 @@ class Session:
             session = guard.restore(redis.get(f"lore:{run_id}"))
 
         Restore reproduces the committed store exactly (facts, insertion
-        order, seed/asserted sources), so verdicts and ``graph`` hydration
+        order, seed/asserted sources, commit steps), so verdicts — including
+        their "already committed at step N" messages — and ``graph`` hydration
         are identical across the round-trip. Snapshots capture
         turn boundaries: persisting a pending proposal is almost certainly a
         bug, so snapshotting with staged facts raises — commit or roll back
@@ -215,7 +246,11 @@ class Session:
             )
         session = cls(guard)
         adapters: dict[str, TypeAdapter[Any]] = {}
-        session._committed.add(_decode_fact(guard, raw, adapters) for raw in data["facts"])
+        facts = [_decode_fact(guard, raw, adapters) for raw in data["facts"]]
+        session._committed.add(facts)
+        # Resume the commit-step counter where the snapshot left off, so
+        # post-restore commits keep numbering (and messages) correct.
+        session._step = max((f.step for f in facts), default=0)
         return session
 
     # --- inspection ------------------------------------------------------------
@@ -225,9 +260,19 @@ class Session:
         """Read-only view over committed ∪ staged — the same API rules receive.
 
         ``graph.get(id)`` rehydrates an entity; ``graph.incoming(id,
-        "Class.field")`` lists the edges pointing at it.
+        "Class.field")`` lists the edges pointing at it; ``graph.reachable(id,
+        "Class.field")`` follows the relation through mirrors and transitive
+        closure (derivations are recomputed on access — session graphs are
+        tiny).
         """
-        return Graph(self._guard, LayeredView(self._committed, self._staged_store))
+        view = LayeredView(self._committed, self._staged_store)
+        derivations = derive(self._guard, view)
+        return Graph(
+            self._guard,
+            view,
+            mirrors=LayeredView(derivations.sym_mirrors, derivations.inv_mirrors),
+            closure=derivations.closure,
+        )
 
     def dump(self) -> str:
         """The session's world as readable text, grouped by entity::
@@ -355,7 +400,8 @@ def _attr_adapter(guard: Guard, attr: str, adapters: dict[str, TypeAdapter[Any]]
 
 def _encode_fact(guard: Guard, fact: Fact, adapters: dict[str, TypeAdapter[Any]]) -> dict[str, Any]:
     if isinstance(fact, TypeFact):
-        return {"kind": "type", "node": fact.node_id, "class": fact.type_name, "source": fact.source}
+        return {"kind": "type", "node": fact.node_id, "class": fact.type_name, "source": fact.source,
+                "step": fact.step}
     if isinstance(fact, EdgeFact):
         return {
             "kind": "edge",
@@ -363,6 +409,7 @@ def _encode_fact(guard: Guard, fact: Fact, adapters: dict[str, TypeAdapter[Any]]
             "predicate": fact.predicate,
             "object": fact.object_id,
             "source": fact.source,
+            "step": fact.step,
         }
     try:
         value = _attr_adapter(guard, fact.attr, adapters).dump_python(
@@ -376,7 +423,7 @@ def _encode_fact(guard: Guard, fact: Fact, adapters: dict[str, TypeAdapter[Any]]
             f"through the field's annotation ({exc})"
         ) from exc
     return {"kind": "attr", "subject": fact.subject_id, "attr": fact.attr, "value": value,
-            "source": fact.source}
+            "source": fact.source, "step": fact.step}
 
 
 def _decode_fact(guard: Guard, raw: Any, adapters: dict[str, TypeAdapter[Any]]) -> Fact:
@@ -384,20 +431,23 @@ def _decode_fact(guard: Guard, raw: Any, adapters: dict[str, TypeAdapter[Any]]) 
         kind, source = raw["kind"], raw["source"]
         if source not in _SOURCES:
             raise LoreError(f"malformed snapshot fact (bad source): {raw!r}")
+        step = raw.get("step", 0)
+        if not isinstance(step, int) or isinstance(step, bool) or step < 0:
+            raise LoreError(f"malformed snapshot fact (bad step): {raw!r}")
         if kind == "type":
             if raw["class"] not in guard.classes:
                 raise LoreError(
                     f"snapshot types {raw['node']!r} as {raw['class']!r}, which is not "
                     f"a class in lore {guard.name!r}"
                 )
-            return TypeFact(raw["node"], raw["class"], source)
+            return TypeFact(raw["node"], raw["class"], source, step=step)
         if kind == "edge":
             if raw["predicate"] not in guard.relations:
                 raise LoreError(
                     f"snapshot refers to relation {raw['predicate']!r}, which is not "
                     f"in lore {guard.name!r}"
                 )
-            return EdgeFact(raw["subject"], raw["predicate"], raw["object"], source)
+            return EdgeFact(raw["subject"], raw["predicate"], raw["object"], source, step=step)
         if kind == "attr":
             adapter = _attr_adapter(guard, raw["attr"], adapters)
             try:
@@ -406,7 +456,7 @@ def _decode_fact(guard: Guard, raw: Any, adapters: dict[str, TypeAdapter[Any]]) 
                 raise LoreError(
                     f"cannot restore {raw['attr']}={raw['value']!r} from a snapshot: {exc}"
                 ) from exc
-            return AttrFact(raw["subject"], raw["attr"], value, source)
+            return AttrFact(raw["subject"], raw["attr"], value, source, step=step)
     except (KeyError, TypeError) as exc:
         raise LoreError(f"malformed snapshot fact: {raw!r}") from exc
     raise LoreError(f"malformed snapshot fact (unknown kind): {raw!r}")

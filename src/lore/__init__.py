@@ -6,7 +6,7 @@ relational constraints, with violations rendered as natural-language repair
 prompts for the agent.
 """
 
-from .engine import Graph
+from .graph import Graph
 from .schema import Entity, Lore, LoreError, Relation, one_of, relation
 from .session import Session
 from .verdict import LoreViolation, Verdict, Violation
