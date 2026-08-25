@@ -152,9 +152,11 @@ class CheckContext:
     staged_edge_keys: set[EdgeKey]
     staged_nodes: set[str]  # nodes with a staged TypeFact
     staged_subjects: set[str]  # every node a staged fact asserts something about
-    # Nodes whose rules must re-run: staged subjects plus the direct targets of
-    # asserted staged edges — an incoming edge can break an aggregate rule on an
-    # otherwise-untouched committed node.
+    # Nodes whose rules must re-run: staged subjects plus every node one
+    # asserted hop away in either direction — a staged fact on a neighbor (a
+    # new incoming edge, a late-filled optional attribute, a subclass re-type)
+    # can change what an aggregate rule on an otherwise-untouched committed
+    # node sees via ``graph.incoming`` and one-hop ``graph.get`` hydration.
     rule_nodes: set[str]
     single_value_view: FactStore  # asserted + symmetric mirrors
     cardinality_view: FactStore  # asserted + symmetric and inverse mirrors
@@ -175,6 +177,15 @@ def build_context(guard: "Guard", view: FactStore, staged: list[Fact]) -> CheckC
     staged_subjects = {
         f.node_id if isinstance(f, TypeFact) else f.subject_id for f in staged
     }
+    # One asserted hop covers every read a one-hop aggregate rule can make;
+    # staged edges are in the view, so their targets are included too.
+    rule_nodes = set(staged_subjects)
+    for predicate in guard.relations:
+        for edge in view.edges(predicate):
+            if edge.subject_id in staged_subjects:
+                rule_nodes.add(edge.object_id)
+            elif edge.object_id in staged_subjects:
+                rule_nodes.add(edge.subject_id)
     return CheckContext(
         guard=guard,
         view=view,
@@ -182,8 +193,7 @@ def build_context(guard: "Guard", view: FactStore, staged: list[Fact]) -> CheckC
         staged_edge_keys=staged_edge_keys,
         staged_nodes={f.node_id for f in staged if isinstance(f, TypeFact)},
         staged_subjects=staged_subjects,
-        rule_nodes=staged_subjects
-        | {f.object_id for f in staged if isinstance(f, EdgeFact)},
+        rule_nodes=rule_nodes,
         single_value_view=single_value_view,
         cardinality_view=cardinality_view,
         relational_view=relational_view,

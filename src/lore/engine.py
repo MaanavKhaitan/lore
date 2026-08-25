@@ -436,12 +436,13 @@ def check_asymmetric(ctx: CheckContext) -> list[Violation]:
 def check_rules(ctx: CheckContext) -> list[Violation]:
     """Run ``@lore.rule`` predicates for every node in ``ctx.rule_nodes`` — the
     subjects of staged facts (not just newly typed nodes: re-asserting a
-    committed id with changed fields must re-run its rules) plus the direct
-    targets of asserted staged edges (a stray incoming edge can break an
-    aggregate rule on an otherwise-untouched committed node) — that is typed
-    with (a subclass of) the rule's target class. The graph handed to rules
-    rehydrates from asserted facts only, but ``graph.reachable()`` sees
-    mirrors and the transitive closure.
+    committed id with changed fields must re-run its rules) plus every node
+    one asserted hop away in either direction (a staged fact on a neighbor —
+    a stray incoming edge, a late-filled optional attribute, a subclass
+    re-type — can break an aggregate rule on an otherwise-untouched committed
+    node) — that is typed with (a subclass of) the rule's target class. The
+    graph handed to rules rehydrates from asserted facts only, but
+    ``graph.reachable()`` sees mirrors and the transitive closure.
     """
     derivations = ctx.derivations
     graph = Graph(
