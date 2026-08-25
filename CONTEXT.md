@@ -294,8 +294,11 @@ symmetric∧inverse_of). Decisions, with rationale in the M2 plan:
    treating all seed facts as staged and raises `LoreError` on rejects;
    `validate_seed=False` opts out.
 7. Characteristics do NOT propagate across inverse pairs; closure edges are
-   not mirrored; rules on committed nodes don't re-run when only their derived
-   neighborhood changes (sound for monotone rules like approver-in-chain).
+   not mirrored; rules re-run on staged subjects plus every node one asserted
+   hop away in either direction (so one-hop aggregate rules survive stray
+   incoming edges, late-filled optional attributes, and subclass re-typing),
+   but not on changes beyond one hop or in the derived neighborhood only
+   (sound for monotone, closure-dependent rules like approver-in-chain).
 
 ---
 

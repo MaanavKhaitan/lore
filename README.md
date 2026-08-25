@@ -280,7 +280,10 @@ self-corrects the other. Costs a few cents per run.
    checks (existence, domain/range, max_per_target, single_value, one_of,
    disjoint, irreflexive, asymmetric, rules) scan the composed views; only
    violations involving staged facts (directly or through a derived edge)
-   are reported.
+   are reported. Rules re-run on staged subjects *and* every node one
+   asserted hop away, so non-monotone one-hop aggregate rules (a sum over
+   `graph.incoming` reading neighbor attributes) stay safe against stray
+   edges, late-filled optional attributes, and subclass re-typing.
 4. **Verdict** — violations carry severity (`reject` blocks commit, `flag`
    commits but is surfaced) and render as concrete, id-naming English, with
    step numbers ("already committed at step 2") and derivation chains.

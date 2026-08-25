@@ -403,3 +403,289 @@ def test_seed_inconsistencies_do_not_refire_on_unrelated_proposals():
     session._committed.add([EdgeFact("ref_seeded", "Refund.refunds", "ghost", "seed")])
     verdict = session.propose(refund("ref_a", refunds="ord_2"))
     assert verdict.ok and verdict.violations == []
+
+
+# --- rule re-fire one asserted hop from staged facts --------------------------
+# Aggregate (non-monotone) rules read a committed node's *incoming* edges and
+# hydrate their subjects, so they must re-run when a staged fact lands within
+# one asserted hop: a stray edge pointing at the node, a late-filled optional
+# attribute on a neighbor, or a subclass re-type of a neighbor.
+
+ledger = Lore("ledger-test")
+
+
+@ledger.entity
+class JournalEntry(Entity):
+    memo: str
+
+
+@ledger.entity
+class Posting(Entity):
+    amount: float  # signed: debits positive, credits negative
+    entry: Relation[JournalEntry]
+
+
+@ledger.rule(message="Journal entry {obj.id} is unbalanced.")
+def entry_balances(entry: JournalEntry, graph) -> bool:
+    postings = graph.incoming(entry.id, "Posting.entry")
+    return sum(graph.get(e.subject_id).amount for e in postings) == 0
+
+
+@ledger.entity
+class Budget(Entity):
+    cap: float
+
+
+@ledger.entity
+class Expense(Entity):
+    amount: float
+    budget: Relation[Budget]
+
+
+@ledger.rule(message="Budget {obj.id} is over its cap.")
+def budget_within_cap(budget: Budget, graph) -> bool:
+    expenses = graph.incoming(budget.id, "Expense.budget")
+    return sum(graph.get(e.subject_id).amount for e in expenses) <= budget.cap
+
+
+ledger_guard = ledger.compile()
+
+
+def ledger_session():
+    session = ledger_guard.session()
+    verdict = session.try_commit(
+        JournalEntry(id="je_1", memo="opening"),
+        Posting(id="p_1", amount=100.0, entry="je_1"),
+        Posting(id="p_2", amount=-100.0, entry="je_1"),
+    )
+    assert verdict.ok, f"balanced setup batch failed: {verdict.violations}"
+    return session
+
+
+def test_stray_edge_refires_rule_on_committed_target():
+    # The regression: a stray posting pointing at a committed entry stages no
+    # fact *about* the entry, but its rule must re-run and catch the imbalance.
+    session = ledger_session()
+    verdict = session.propose(Posting(id="p_stray", amount=50.0, entry="je_1"))
+    assert verdict.ok is False
+    assert {(v.check, v.subjects) for v in verdict.violations} == {
+        ("rule:entry_balances", ("je_1",))
+    }
+    (violation,) = verdict.violations
+    assert "je_1" in violation.message
+
+
+def test_rejected_stray_edge_leaves_zero_trace():
+    session = ledger_session()
+    assert not session.propose(Posting(id="p_stray", amount=50.0, entry="je_1")).ok
+    session.rollback()
+    assert "p_stray" not in session.dump()
+    assert session.graph.get("p_stray") is None
+    verdict = session.try_commit(
+        JournalEntry(id="je_2", memo="closing"),
+        Posting(id="p_3", amount=25.0, entry="je_2"),
+        Posting(id="p_4", amount=-25.0, entry="je_2"),
+    )
+    assert verdict.ok and verdict.violations == []
+
+
+def test_valid_incoming_edge_still_commits():
+    # Re-firing must not make incoming edges over-strict: an edge that keeps
+    # the aggregate within bounds commits; the one that breaks it is rejected.
+    session = ledger_guard.session()
+    assert session.try_commit(Budget(id="bud_1", cap=100.0)).ok
+    assert session.try_commit(Expense(id="ex_1", amount=60.0, budget="bud_1")).ok
+    verdict = session.try_commit(Expense(id="ex_2", amount=30.0, budget="bud_1"))
+    assert verdict.ok and verdict.violations == []
+    verdict = session.try_commit(Expense(id="ex_3", amount=20.0, budget="bud_1"))
+    assert {(v.check, v.subjects) for v in verdict.violations} == {
+        ("rule:budget_within_cap", ("bud_1",))
+    }
+
+
+def test_dangling_edge_target_reports_existence_without_rule_crash():
+    session = ledger_guard.session()
+    verdict = session.propose(Posting(id="p_x", amount=50.0, entry="nope"))
+    assert {(v.check, v.subjects) for v in verdict.violations} == {
+        ("existence", ("p_x", "nope"))
+    }
+
+
+def test_closure_change_beyond_one_hop_does_not_refire_rules():
+    # Boundary lock-in: re-fire is one *asserted* hop from staged facts. A
+    # staged edge two hops away that changes a committed node's transitive
+    # closure — without any asserted fact within one hop of it — must not
+    # re-run its rules. Changing this boundary should be a deliberate decision.
+    chain = Lore("closure-boundary-test")
+
+    @chain.entity
+    class Node(Entity):
+        next: Relation["Node"] | None = relation(transitive=True, default=None)
+
+    @chain.rule(message="Node {obj.id} reaches the forbidden node.")
+    def a_avoids_forbidden(node: Node, graph) -> bool:
+        # Only "a" is constrained, so every node within one hop of the staged
+        # edge below passes trivially — a failure could come only from
+        # re-running the rule on the committed node "a", two hops upstream.
+        return node.id != "a" or "bad" not in graph.reachable("a", "Node.next")
+
+    session = chain.compile().session()
+    assert session.try_commit(
+        Node(id="bad"), Node(id="b"), Node(id="m", next="b"), Node(id="a", next="m")
+    ).ok
+    verdict = session.try_commit(Node(id="b", next="bad"))
+    assert verdict.ok and verdict.violations == []
+    # The closure did change — a now reaches bad — but a's rule stayed silent.
+    assert "bad" in session.graph.reachable("a", "Node.next")
+
+
+def test_target_that_is_also_staged_subject_runs_rules_once():
+    session = ledger_session()
+    verdict = session.propose(
+        JournalEntry(id="je_1", memo="amended"),
+        Posting(id="p_stray", amount=50.0, entry="je_1"),
+    )
+    # je_1 is both a staged subject (changed memo → single_value) and the
+    # target of a staged edge; its balance rule fires once, not twice.
+    assert {(v.check, v.subjects) for v in verdict.violations} == {
+        ("single_value", ("je_1",)),
+        ("rule:entry_balances", ("je_1",)),
+    }
+    assert len(verdict.violations) == 2
+
+
+def test_stray_edge_repair_prompt_renders_rule_message():
+    session = ledger_session()
+    verdict = session.propose(Posting(id="p_stray", amount=50.0, entry="je_1"))
+    assert "Journal entry je_1 is unbalanced." in verdict.repair_prompt()
+
+
+# A staged fact on the subject of an already-committed edge changes the
+# target's aggregate without staging anything about the target: re-asserting
+# the entity filters the committed edge from the staged set, so only the
+# one-hop re-fire boundary catches these.
+
+pending = Lore("pending-ledger-test")
+
+
+@pending.entity
+class PendingEntry(Entity):
+    memo: str
+
+
+@pending.entity
+class PendingPosting(Entity):
+    amount: float | None = None  # pending postings get an amount later
+    entry: Relation[PendingEntry]
+
+
+@pending.rule(message="Journal entry {obj.id} is unbalanced.")
+def pending_entry_balances(entry: PendingEntry, graph) -> bool:
+    postings = graph.incoming(entry.id, "PendingPosting.entry")
+    return sum(graph.get(e.subject_id).amount or 0.0 for e in postings) == 0
+
+
+pending_guard = pending.compile()
+
+
+def test_late_attr_fill_refires_rule_on_committed_edge_target():
+    # The edge p_1 → e_1 is committed, so filling p_1's amount stages only an
+    # AttrFact — yet e_1's balance changes and its rule must re-run.
+    session = pending_guard.session()
+    assert session.try_commit(
+        PendingEntry(id="e_1", memo="opening"),
+        PendingPosting(id="p_1", entry="e_1"),  # amount unknown → sums to 0
+    ).ok
+    verdict = session.propose(PendingPosting(id="p_1", amount=50.0, entry="e_1"))
+    assert {(v.check, v.subjects) for v in verdict.violations} == {
+        ("rule:pending_entry_balances", ("e_1",))
+    }
+
+
+def test_late_attr_fills_that_keep_balance_commit():
+    session = pending_guard.session()
+    assert session.try_commit(
+        PendingEntry(id="e_1", memo="opening"),
+        PendingPosting(id="p_1", entry="e_1"),
+        PendingPosting(id="p_2", entry="e_1"),
+    ).ok
+    verdict = session.try_commit(
+        PendingPosting(id="p_1", amount=25.0, entry="e_1"),
+        PendingPosting(id="p_2", amount=-25.0, entry="e_1"),
+    )
+    assert verdict.ok and verdict.violations == []
+
+
+tiers = Lore("tiered-budget-test")
+
+
+@tiers.entity
+class TieredBudget(Entity):
+    premium_cap: float
+
+
+@tiers.entity
+class TierExpense(Entity):
+    amount: float
+    budget: Relation[TieredBudget]
+
+
+@tiers.entity
+class PremiumExpense(TierExpense):
+    pass
+
+
+@tiers.rule(message="Budget {obj.id} is over its premium cap.")
+def premium_within_cap(budget: TieredBudget, graph) -> bool:
+    expenses = (graph.get(e.subject_id) for e in graph.incoming(budget.id, "TierExpense.budget"))
+    return sum(e.amount for e in expenses if isinstance(e, PremiumExpense)) <= budget.premium_cap
+
+
+tiers_guard = tiers.compile()
+
+
+def test_subclass_retype_refires_rule_on_committed_edge_target():
+    # Re-typing ex_1 as PremiumExpense stages only a TypeFact (its amount and
+    # edge are already committed), but bud_1's premium aggregate changes.
+    session = tiers_guard.session()
+    assert session.try_commit(TieredBudget(id="bud_1", premium_cap=50.0)).ok
+    assert session.try_commit(TierExpense(id="ex_1", amount=60.0, budget="bud_1")).ok
+    verdict = session.propose(PremiumExpense(id="ex_1", amount=60.0, budget="bud_1"))
+    assert {(v.check, v.subjects) for v in verdict.violations} == {
+        ("rule:premium_within_cap", ("bud_1",))
+    }
+
+
+caps = Lore("cap-fill-test")
+
+
+@caps.entity
+class CapBudget(Entity):
+    cap: float | None = None  # cap may be set after expenses exist
+
+
+@caps.entity
+class CapExpense(Entity):
+    amount: float
+    budget: Relation[CapBudget]
+
+
+@caps.rule(message="Expense {obj.id} exceeds its budget's cap.")
+def expense_within_cap(expense: CapExpense, graph) -> bool:
+    budget = graph.get(expense.budget)
+    return budget is None or budget.cap is None or expense.amount <= budget.cap
+
+
+caps_guard = caps.compile()
+
+
+def test_late_cap_fill_refires_rule_on_committed_edge_subject():
+    # The other direction: setting bud_1's cap stages only an AttrFact on
+    # bud_1, but the rule on the committed expense pointing at it newly fails.
+    session = caps_guard.session()
+    assert session.try_commit(CapBudget(id="bud_1")).ok
+    assert session.try_commit(CapExpense(id="ex_1", amount=60.0, budget="bud_1")).ok
+    verdict = session.propose(CapBudget(id="bud_1", cap=50.0))
+    assert {(v.check, v.subjects) for v in verdict.violations} == {
+        ("rule:expense_within_cap", ("ex_1",))
+    }

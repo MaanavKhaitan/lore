@@ -152,6 +152,12 @@ class CheckContext:
     staged_edge_keys: set[EdgeKey]
     staged_nodes: set[str]  # nodes with a staged TypeFact
     staged_subjects: set[str]  # every node a staged fact asserts something about
+    # Nodes whose rules must re-run: staged subjects plus every node one
+    # asserted hop away in either direction — a staged fact on a neighbor (a
+    # new incoming edge, a late-filled optional attribute, a subclass re-type)
+    # can change what an aggregate rule on an otherwise-untouched committed
+    # node sees via ``graph.incoming`` and one-hop ``graph.get`` hydration.
+    rule_nodes: set[str]
     single_value_view: FactStore  # asserted + symmetric mirrors
     cardinality_view: FactStore  # asserted + symmetric and inverse mirrors
     relational_view: FactStore  # asserted + all mirrors + closure
@@ -168,15 +174,26 @@ def build_context(guard: "Guard", view: FactStore, staged: list[Fact]) -> CheckC
     single_value_view = LayeredView(view, derivations.sym_mirrors)
     cardinality_view = LayeredView(single_value_view, derivations.inv_mirrors)
     relational_view = LayeredView(cardinality_view, derivations.closure)
+    staged_subjects = {
+        f.node_id if isinstance(f, TypeFact) else f.subject_id for f in staged
+    }
+    # One asserted hop covers every read a one-hop aggregate rule can make;
+    # staged edges are in the view, so their targets are included too.
+    rule_nodes = set(staged_subjects)
+    for predicate in guard.relations:
+        for edge in view.edges(predicate):
+            if edge.subject_id in staged_subjects:
+                rule_nodes.add(edge.object_id)
+            elif edge.object_id in staged_subjects:
+                rule_nodes.add(edge.subject_id)
     return CheckContext(
         guard=guard,
         view=view,
         staged=staged,
         staged_edge_keys=staged_edge_keys,
         staged_nodes={f.node_id for f in staged if isinstance(f, TypeFact)},
-        staged_subjects={
-            f.node_id if isinstance(f, TypeFact) else f.subject_id for f in staged
-        },
+        staged_subjects=staged_subjects,
+        rule_nodes=rule_nodes,
         single_value_view=single_value_view,
         cardinality_view=cardinality_view,
         relational_view=relational_view,
