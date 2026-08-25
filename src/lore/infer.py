@@ -146,6 +146,10 @@ class CheckContext:
 
     guard: "Guard"
     view: FactStore  # asserted facts only: committed ∪ staged
+    # The pre-proposal world (committed only) — the baseline the rule check
+    # compares against to decide whether a failure is *newly caused* by the
+    # staged facts or predates them.
+    base: FactStore
     staged: list[Fact]
     # Staged involvement by content key: asserted staged edges plus every
     # derived edge whose base path touches one.
@@ -164,7 +168,11 @@ class CheckContext:
     derivations: Derivations
 
 
-def build_context(guard: "Guard", view: FactStore, staged: list[Fact]) -> CheckContext:
+def build_context(
+    guard: "Guard", view: FactStore, staged: list[Fact], base: FactStore | None = None
+) -> CheckContext:
+    """``base`` is the committed-only store; ``None`` means everything in
+    ``view`` is staged (seed validation), so the baseline is an empty world."""
     derivations = derive(guard, view)
     raw_staged = {_edge_key(f) for f in staged if isinstance(f, EdgeFact)}
     staged_edge_keys = set(raw_staged)
@@ -189,6 +197,7 @@ def build_context(guard: "Guard", view: FactStore, staged: list[Fact]) -> CheckC
     return CheckContext(
         guard=guard,
         view=view,
+        base=base if base is not None else InMemoryStore(),
         staged=staged,
         staged_edge_keys=staged_edge_keys,
         staged_nodes={f.node_id for f in staged if isinstance(f, TypeFact)},

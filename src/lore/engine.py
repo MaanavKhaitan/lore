@@ -2,9 +2,12 @@
 
 Grounding is purely mechanical (typed instance → facts; no lookups, no LLM).
 Checks are deliberately dumb scans over composed fact views on every propose —
-session graphs are tiny, so no incremental scoping — but only violations that
-involve at least one *staged* fact (directly, or through a derived edge whose
-base path touches one) are reported, so pre-existing seed inconsistencies
+session graphs are tiny (one agent run, 10²–10³ facts), so no incremental
+scoping — but only violations *caused* by staged facts are reported: for the
+axiom checks, violations involving a staged fact directly or through a
+derived edge; for rules, failures on the proposal's neighborhood plus
+committed nodes whose rule the proposal newly flips from satisfied to
+violated (see ``check_rules``). Pre-existing seed inconsistencies therefore
 don't re-fire on every proposal.
 
 Each check receives a :class:`~lore.infer.CheckContext` and reads the view
@@ -18,7 +21,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .graph import Graph, _most_specific
-from .infer import CheckContext, EdgeKey, _edge_key
+from .infer import CheckContext, EdgeKey, _edge_key, derive
 from .schema import Entity, LoreError
 from .store import AttrFact, EdgeFact, Fact, LayeredView, Source, TypeFact
 from .verdict import Violation
@@ -353,6 +356,45 @@ def check_disjoint(ctx: CheckContext) -> list[Violation]:
     return out
 
 
+def check_type_coherence(ctx: CheckContext) -> list[Violation]:
+    """A node's types must form one ancestry chain. Entities rehydrate as a
+    single most-specific class, so an id typed under two *incomparable*
+    branches — sibling subclasses, or unrelated classes — is a state the
+    entity layer cannot represent, and a rule targeting the unpicked branch
+    could never run against it (a silent enforcement bypass). Reject the
+    proposal instead; the agent's repair is a distinct id or the right class.
+    Declared-disjoint pairs are the disjoint check's job. Only nodes that
+    gained a staged TypeFact can newly violate this.
+    """
+    out = []
+    for node_id in sorted(ctx.staged_nodes):
+        types = ctx.view.types_of(node_id)
+        if len(types) < 2:
+            continue
+        maximal = [
+            t
+            for t in sorted(types)
+            if not any(u != t and t in ctx.guard.classes[u].ancestors for u in types)
+        ]
+        for i, a in enumerate(maximal):
+            for b in maximal[i + 1 :]:
+                if (a, b) in ctx.guard.disjoint_pairs:
+                    continue
+                out.append(
+                    Violation(
+                        check="type_coherence",
+                        severity="reject",
+                        message=(
+                            f"{node_id} cannot be both {_an(a)} and {_an(b)}: neither "
+                            "is a kind of the other, so no single entity can carry "
+                            "both — use a distinct id."
+                        ),
+                        subjects=(node_id,),
+                    )
+                )
+    return out
+
+
 def check_irreflexive(ctx: CheckContext) -> list[Violation]:
     """No staged-involved self-edge — asserted or derived — on an irreflexive
     predicate. On a transitive predicate this is cycle detection: a proposed
@@ -447,15 +489,26 @@ def check_asymmetric(ctx: CheckContext) -> list[Violation]:
 
 
 def check_rules(ctx: CheckContext) -> list[Violation]:
-    """Run ``@lore.rule`` predicates for every node in ``ctx.rule_nodes`` — the
-    subjects of staged facts (not just newly typed nodes: re-asserting a
-    committed id with changed fields must re-run its rules) plus every node
-    one asserted hop away in either direction (a staged fact on a neighbor —
-    a stray incoming edge, a late-filled optional attribute, a subclass
-    re-type — can break an aggregate rule on an otherwise-untouched committed
-    node) — that is typed with (a subclass of) the rule's target class. The
-    graph handed to rules rehydrates from asserted facts only, but
-    ``graph.reachable()`` sees mirrors and the transitive closure.
+    """Run ``@lore.rule`` predicates on every instance of each rule's target
+    class in the composed view, in two reporting regimes:
+
+    - Nodes in ``ctx.rule_nodes`` — the subjects of staged facts (re-asserting
+      a committed id with changed fields must re-run its rules) plus every
+      node one asserted hop away in either direction — report every failure:
+      the proposal asserts something about them or their direct neighborhood,
+      so a failure is the proposal's business even if it predates it.
+    - Every other committed instance is checked **differentially**: a failure
+      is reported only if the rule passed on the pre-proposal baseline
+      (``ctx.base``) — i.e. the staged facts newly broke it. Committed facts
+      are immutable, so silently letting a satisfied rule flip would leave the
+      world unrepairable; the flip is rejected at proposal time instead, and
+      pre-existing failures (e.g. a world seeded with ``validate_seed=False``)
+      never re-fire against unrelated proposals. This also removes the old
+      monotonicity requirement on rules that read beyond one hop.
+
+    The graph handed to rules rehydrates from asserted facts only, but
+    ``graph.reachable()`` sees mirrors and the transitive closure; the
+    baseline graph gets its own derivations over the committed store.
     """
     derivations = ctx.derivations
     graph = Graph(
@@ -464,20 +517,57 @@ def check_rules(ctx: CheckContext) -> list[Violation]:
         mirrors=LayeredView(derivations.sym_mirrors, derivations.inv_mirrors),
         closure=derivations.closure,
     )
+    baseline: Graph | None = None
+
+    def baseline_graph() -> Graph:
+        # Built lazily: only needed when a node outside the proposal's
+        # neighborhood fails, which is the rare path.
+        nonlocal baseline
+        if baseline is None:
+            derived = derive(ctx.guard, ctx.base)
+            baseline = Graph(
+                ctx.guard,
+                ctx.base,
+                mirrors=LayeredView(derived.sym_mirrors, derived.inv_mirrors),
+                closure=derived.closure,
+            )
+        return baseline
+
     out = []
-    for node_id in sorted(ctx.rule_nodes):
-        types = ctx.view.types_of(node_id)
-        for rule in ctx.guard.rules:
-            if rule.target not in types:
-                continue
+    for rule in ctx.guard.rules:
+        target_cls = ctx.guard.classes[rule.target].cls
+        for node_id in sorted(ctx.view.nodes_of(rule.target)):
             obj = graph.get(node_id)
-            if obj is None or rule.fn(obj, graph):
+            # A node typed under two incomparable branches rehydrates as only
+            # one of them; a rule targeting the other branch would receive an
+            # object missing its fields. Proposals that create such a node are
+            # rejected by check_type_coherence — this guard only keeps rules
+            # from crashing on worlds that already contain one (seeded with
+            # validate_seed=False, or restored from a snapshot).
+            if obj is None or not isinstance(obj, target_cls):
                 continue
+            if rule.fn(obj, graph):
+                continue
+            if node_id not in ctx.rule_nodes:
+                base_obj = baseline_graph().get(node_id)
+                if (
+                    base_obj is None
+                    or not isinstance(base_obj, target_cls)
+                    or not rule.fn(base_obj, baseline_graph())
+                ):
+                    continue  # failing before the proposal too — not newly broken
+                message = (
+                    rule.message.format(obj=obj)
+                    + " This rule held before this proposal — the proposed facts"
+                    " would break it."
+                )
+            else:
+                message = rule.message.format(obj=obj)
             out.append(
                 Violation(
                     check=f"rule:{rule.name}",
                     severity=rule.severity,
-                    message=rule.message.format(obj=obj),
+                    message=message,
                     subjects=(node_id,),
                 )
             )
@@ -492,6 +582,7 @@ ALL_CHECKS = (
     check_single_value,
     check_one_of,
     check_disjoint,
+    check_type_coherence,
     check_irreflexive,
     check_asymmetric,
     check_rules,

@@ -69,14 +69,13 @@ class Graph:
                 # hydrates with its own values.
                 kwargs[field_name] = edges[-1].object_id
         for field_name, attr in compiled.attributes.items():
-            for fact in self._view.attrs(attr.attr):
-                if fact.subject_id == node_id:
-                    kwargs[field_name] = fact.value  # no break: newest value wins
+            for fact in self._view.attrs_of(node_id, attr.attr):
+                kwargs[field_name] = fact.value  # no break: newest value wins
         return compiled.cls(**kwargs)
 
     def incoming(self, node_id: str, predicate: str) -> list[EdgeFact]:
         """All asserted edges pointing *at* ``node_id`` via ``"ClassName.field"``."""
-        return [e for e in self._view.edges(predicate) if e.object_id == node_id]
+        return self._view.edges_to(node_id, predicate)
 
     def reachable(self, node_id: str, predicate: str) -> set[str]:
         """Every node reachable from ``node_id`` via one or more ``predicate``
