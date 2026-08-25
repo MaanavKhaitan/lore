@@ -255,6 +255,9 @@ with the guard at both check points of a tool-use loop:
   against the committed ledger, so a summary that violates the lore or
   claims a refund that was never issued bounces back too.
 
+It builds its system prompt with `to_context()` as shown above, and takes
+`--no-context` to run detection-only.
+
 ```bash
 pip install -e ".[anthropic]"
 ANTHROPIC_API_KEY=... python examples/commerce/live_agent.py   # or put the key in a repo-root .env

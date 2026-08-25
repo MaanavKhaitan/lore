@@ -15,7 +15,12 @@ refund history or account types. The lore session (the refunds ledger) does —
 which is the point: the guard deterministically catches what the model cannot
 see in its context, and the repair prompt tells it why.
 
-Run:  python examples/commerce/live_agent.py
+The system prompt embeds the lore via ``guard.to_context()`` (prevention: the
+model knows the rules) while the session still checks every tool call and the
+final output (detection: violations are caught anyway). Pass ``--no-context``
+to omit the rules from the prompt and run the detection-only variant.
+
+Run:  python examples/commerce/live_agent.py [--no-context]
 Needs ANTHROPIC_API_KEY (env var, or a repo-root .env). Costs a few cents.
 """
 
@@ -156,13 +161,19 @@ OUTPUT_FORMAT = {
     },
 }
 
-SYSTEM = """You are a refunds agent for a small store. Use the tools to look up
-context and issue refunds. The payments system deterministically enforces the
+INSTRUCTIONS = """You are a refunds agent for a small store. Use the tools to look
+up context and issue refunds. The payments system deterministically enforces the
 store's ledger and account rules, so you may attempt any refund the customer
 asks for and rely on its error messages: if it rejects a refund as impossible,
 explain that to the customer instead of retrying the same thing; if it rejects
 a detail of the refund (for example the payout account), correct that detail
 and retry. Report only refunds the issue_refund tool actually confirmed."""
+
+# Prevention + detection from one declaration: the same lore that checks every
+# tool call and the final output is rendered into the prompt so the model
+# knows the rules up front. --no-context drops the rendering (detection only).
+INCLUDE_CONTEXT = "--no-context" not in sys.argv
+SYSTEM = guard.to_context() + "\n\n" + INSTRUCTIONS if INCLUDE_CONTEXT else INSTRUCTIONS
 
 REQUEST = """Three refund requests from customer cust_1 (Ada) came in today:
 
@@ -258,6 +269,10 @@ def main() -> None:
     messages: list[dict] = [{"role": "user", "content": REQUEST}]
     total_in = total_out = 0
 
+    if INCLUDE_CONTEXT:
+        print("system prompt: lore rules included (run with --no-context to omit them)")
+    else:
+        print("system prompt: instructions only (detection-only mode)")
     print("=== live agent transcript ===")
     print(f"[user]         {indented(REQUEST).lstrip()}\n")
 
