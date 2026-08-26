@@ -1,5 +1,8 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import "@fontsource/ibm-plex-sans/latin-400.css";
+import "@fontsource/ibm-plex-sans/latin-500.css";
+import "@fontsource/ibm-plex-sans/latin-600.css";
 import { decodeSnapshot, decodeSpec, decodeTrace } from "./data/decode";
 import "./styles.css";
 import type { Snapshot, Spec, Trace } from "./types";

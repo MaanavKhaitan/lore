@@ -8,6 +8,9 @@ export default defineConfig({
   plugins: [react()],
   build: {
     cssCodeSplit: false,
+    // Inline the woff2 fonts as base64 into viz.css — the export must stay a
+    // single self-contained file with no network requests.
+    assetsInlineLimit: 200_000,
     rollupOptions: {
       output: {
         inlineDynamicImports: true,
