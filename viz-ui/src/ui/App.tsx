@@ -56,11 +56,7 @@ export function App({ spec, trace, snapshot }: AppProps) {
     <div className="viz-root">
       <style>{colorCss}</style>
       <header className="app-header">
-        <h1>{spec.lore}</h1>
-        <span className="header-note">
-          {spec.classes.length} entity kinds · {spec.rules.length} rules · {spec.goals.length} goals
-          {mode === "snapshot" && " · viewing a saved snapshot"}
-        </span>
+        <h1>lore</h1>
       </header>
       {staleData && (
         <div className="banner-warn" role="alert">
