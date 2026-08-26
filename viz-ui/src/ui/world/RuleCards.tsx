@@ -64,7 +64,6 @@ function RuleCard({
         </span>
       </header>
       <p className="rule-plain">{rule.plain}</p>
-      {rule.doc && <p className="rule-doc">{rule.doc.split("\n")[0]}</p>}
     </article>
   );
 }
