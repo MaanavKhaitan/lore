@@ -122,7 +122,7 @@ export function EventRow({ row, spec, committedFacts, expanded, onToggle }: Even
         <div className="row-body">
           {verdict.repairPrompt && (
             <div className="repair">
-              <h4>Repair prompt</h4>
+              <h4>Repair prompt sent back to agent</h4>
               <pre>{verdict.repairPrompt}</pre>
             </div>
           )}
