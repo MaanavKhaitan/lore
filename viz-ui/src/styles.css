@@ -74,8 +74,9 @@ body {
   font-size: 14px;
 }
 .header-domain::before {
-  content: "·";
+  content: "•";
   color: var(--muted);
+  font-size: 18px;
   margin-right: 12px;
 }
 .banner-warn {
