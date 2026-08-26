@@ -72,8 +72,11 @@ body {
 .header-domain {
   color: var(--ink-2);
   font-size: 14px;
-  border-left: 1px solid var(--grid);
-  padding-left: 12px;
+}
+.header-domain::before {
+  content: "·";
+  color: var(--muted);
+  margin-right: 12px;
 }
 .banner-warn {
   background: color-mix(in srgb, var(--warning) 16%, var(--surface-1));
