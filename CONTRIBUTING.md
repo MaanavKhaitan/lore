@@ -78,3 +78,23 @@ Mirror `tests/test_adapter_*.py`. Four things to cover:
 3. A rejected output leaves the session unchanged — `session.facts` is
    identical and `session.staged_facts == ()`.
 4. If the SDK is optional, start the file with `pytest.importorskip(...)`.
+
+## The viewer (lore.viz)
+
+The web viewer's source lives in `viz-ui/` (React + Vite + TypeScript); the
+**built bundle is checked in** at `src/lore/viz/assets/` so the pip package
+ships it and Python never needs node. After changing anything under
+`viz-ui/src/`:
+
+```bash
+cd viz-ui
+npm install        # first time only
+npm run build      # type-checks, builds, and syncs src/lore/viz/assets/
+```
+
+Commit the regenerated assets together with the source change — the test
+suite asserts the assets exist and carry the payload-format sentinel
+(`lore-spec-format:<N>` must match `lore.viz.SPEC_FORMAT`), but it cannot
+detect a stale bundle whose format didn't change. Dev loop: regenerate the
+fixtures with `python examples/contracts/demo.py --json viz-ui/fixtures`,
+then `npm run dev` inside `viz-ui/`.

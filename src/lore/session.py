@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 from contextlib import contextmanager
 from dataclasses import replace
-from typing import Any, Iterable, Iterator
+from typing import Any, Iterable, Iterator, Protocol
 
 from pydantic import TypeAdapter
 
@@ -27,7 +27,20 @@ from .schema import Entity, LoreError
 from .store import AttrFact, EdgeFact, Fact, FactStore, InMemoryStore, LayeredView, TypeFact
 from .verdict import LoreViolation, Verdict, Violation
 
-__all__ = ["Session", "Verdict", "Violation"]
+__all__ = ["Session", "SessionRecorder", "Verdict", "Violation"]
+
+
+class SessionRecorder(Protocol):
+    """Observer for session lifecycle events (e.g. ``lore.viz.TraceRecorder``).
+
+    Called synchronously at each transaction boundary; a recorder must never
+    raise or mutate the session. Event kinds and payloads: ``session_start``
+    (facts), ``propose`` (facts, verdict), ``commit`` (step — ``None`` for an
+    empty commit), ``rollback``, ``check`` (facts, verdict), ``check_goals``
+    (verdict), ``snapshot``, ``restore`` (facts).
+    """
+
+    def on_event(self, kind: str, session: "Session", **data: Any) -> None: ...
 
 
 class Session:
@@ -39,7 +52,12 @@ class Session:
     """
 
     def __init__(
-        self, guard: Guard, seed: Iterable[Entity] = (), *, validate_seed: bool = True
+        self,
+        guard: Guard,
+        seed: Iterable[Entity] = (),
+        *,
+        validate_seed: bool = True,
+        recorder: SessionRecorder | None = None,
     ) -> None:
         self._guard = guard
         self._committed = InMemoryStore()
@@ -49,8 +67,15 @@ class Session:
         self._staged_store = InMemoryStore()
         self._last_verdict: Verdict | None = None
         self._step = 0
+        self._recorder = recorder
+        self._recording_paused = False
         if validate_seed and self._committed.all_facts():
             self._validate_seed()
+        self._emit("session_start", facts=self._committed.all_facts())
+
+    def _emit(self, kind: str, **data: Any) -> None:
+        if self._recorder is not None and not self._recording_paused:
+            self._recorder.on_event(kind, self, **data)
 
     def _validate_seed(self) -> None:
         """Run the full derive+check pass with every seed fact treated as
@@ -72,6 +97,8 @@ class Session:
         Any previously staged (uncommitted) facts are discarded first — an
         implicit rollback, which is exactly right for agent retry loops.
         """
+        if self._staged is not None:
+            self._emit("rollback")  # the implicit rollback, made visible to recorders
         staged: list[Fact] = []
         for obj in objs:
             for fact in ground(self._guard, obj, "asserted"):
@@ -92,6 +119,7 @@ class Session:
         self._staged = staged
         self._staged_store = staged_store
         self._last_verdict = verdict
+        self._emit("propose", facts=tuple(staged), verdict=verdict)
         return verdict
 
     def commit(self) -> None:
@@ -109,15 +137,21 @@ class Session:
             raise LoreError(
                 f"cannot commit: the last verdict has {rejects} reject-severity violation(s)"
             )
+        step: int | None = None
         if self._staged:
             assert all(f.source != "derived" for f in self._staged)
             self._step += 1
+            step = self._step
             self._committed.add(replace(f, step=self._step) for f in self._staged)
         self._clear_staged()
+        self._emit("commit", step=step)
 
     def rollback(self) -> None:
         """Drop the staged facts (no-op if nothing is staged)."""
+        had_staged = self._staged is not None
         self._clear_staged()
+        if had_staged:
+            self._emit("rollback")
 
     # --- ergonomic wrappers over propose/commit/rollback ----------------------
 
@@ -130,10 +164,17 @@ class Session:
         ``check`` — it is safe to call anywhere.
         """
         saved = (self._staged, self._staged_store, self._last_verdict)
+        # A check is a preflight, not a proposal: pause recording so the
+        # internal propose() doesn't emit, then report one "check" event.
+        self._recording_paused = True
         try:
-            return self.propose(*objs)
+            verdict = self.propose(*objs)
+            checked = tuple(self._staged or ())
         finally:
+            self._recording_paused = False
             self._staged, self._staged_store, self._last_verdict = saved
+        self._emit("check", facts=checked, verdict=verdict)
+        return verdict
 
     def try_commit(self, *objs: Entity) -> Verdict:
         """Propose ``objs``, commit if the verdict is ok, roll back otherwise.
@@ -204,7 +245,9 @@ class Session:
             raise LoreError(
                 "cannot check goals with a pending proposal: commit() or rollback() first"
             )
-        return Verdict(run_goals(self._guard, self._committed))
+        verdict = Verdict(run_goals(self._guard, self._committed))
+        self._emit("check_goals", verdict=verdict)
+        return verdict
 
     # --- persistence -----------------------------------------------------------
 
@@ -237,14 +280,17 @@ class Session:
             "lore": self._guard.name,
             "fingerprint": self._guard.fingerprint,
             "facts": [
-                _encode_fact(self._guard, fact, adapters)
+                encode_fact(self._guard, fact, adapters)
                 for fact in self._committed.all_facts()
             ],
         }
+        self._emit("snapshot")
         return json.dumps(payload, separators=(",", ":"))
 
     @classmethod
-    def restore(cls, guard: Guard, blob: str | bytes) -> "Session":
+    def restore(
+        cls, guard: Guard, blob: str | bytes, *, recorder: SessionRecorder | None = None
+    ) -> "Session":
         """Rehydrate a session from a :meth:`snapshot` blob.
 
         The restored facts are trusted as-is (they passed checks when they
@@ -274,6 +320,8 @@ class Session:
                 f"{guard.fingerprint!r} — the lore has changed since this snapshot was "
                 "taken; restore with the original definition or start a fresh session"
             )
+        # Construct with the recorder detached: a restore is not a fresh
+        # session start, so it reports one "restore" event instead.
         session = cls(guard)
         adapters: dict[str, TypeAdapter[Any]] = {}
         facts = [_decode_fact(guard, raw, adapters) for raw in data["facts"]]
@@ -281,6 +329,8 @@ class Session:
         # Resume the commit-step counter where the snapshot left off, so
         # post-restore commits keep numbering (and messages) correct.
         session._step = max((f.step for f in facts), default=0)
+        session._recorder = recorder
+        session._emit("restore", facts=session._committed.all_facts())
         return session
 
     # --- inspection ------------------------------------------------------------
@@ -428,7 +478,8 @@ def _attr_adapter(guard: Guard, attr: str, adapters: dict[str, TypeAdapter[Any]]
     return adapter
 
 
-def _encode_fact(guard: Guard, fact: Fact, adapters: dict[str, TypeAdapter[Any]]) -> dict[str, Any]:
+def encode_fact(guard: Guard, fact: Fact, adapters: dict[str, TypeAdapter[Any]]) -> dict[str, Any]:
+    """Encode one fact as the snapshot codec's JSON dict (shared with lore.viz)."""
     if isinstance(fact, TypeFact):
         return {"kind": "type", "node": fact.node_id, "class": fact.type_name, "source": fact.source,
                 "step": fact.step}

@@ -7,3 +7,4 @@ dist/
 .hypothesis/
 *.egg-info/
 uv.lock
+node_modules/

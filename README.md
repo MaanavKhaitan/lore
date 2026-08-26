@@ -201,6 +201,40 @@ has since changed raises instead of silently validating old facts against new
 rules. Snapshots capture turn boundaries — snapshotting with an uncommitted
 proposal raises too.
 
+## See it: one HTML file, three tabs
+
+`lore.viz` exports a self-contained HTML viewer — no server, no build step,
+open it in a browser or Slack it to a teammate:
+
+```python
+from lore.viz import TraceRecorder, to_html
+
+recorder = TraceRecorder()
+session = guard.session(seed=[...], recorder=recorder)  # observe every transaction
+...
+to_html(guard, trace=recorder, out="run.html")
+```
+
+- **World** — your declarations as a diagram: entity cards, relation arrows
+  with plain-English badges ("at most 1 per target", "no cycles"), and every
+  rule and goal as the same English `to_context()` puts in the prompt.
+- **Timeline** — the flight recorder: every propose/commit/reject in order;
+  expand a rejection to see the exact repair prompt the agent got, plus the
+  violation drawn on the graph — the proposed facts dashed, the offending
+  path in red.
+- **State** — the committed world as a graph, with a scrubber that replays it
+  growing step by step.
+
+Production debugging needs no trace: `to_html(guard, snapshot=blob,
+out="state.html")` renders the State view straight from a persisted
+`session.snapshot()` blob. There's a CLI too:
+
+```bash
+python -m lore.viz examples/contracts/world.py -o world.html          # schema only
+python -m lore.viz myapp.world:guard --snapshot blob.json -o run.html # from redis
+python examples/contracts/demo.py --html contracts.html               # full demo run
+```
+
 ## Put the rules in the prompt too
 
 ```python

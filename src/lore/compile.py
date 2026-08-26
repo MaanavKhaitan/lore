@@ -23,7 +23,7 @@ from .engine import _an
 from .schema import Entity, Lore, LoreError, Severity, _RawRule, _RelTarget
 
 if TYPE_CHECKING:
-    from .session import Session
+    from .session import Session, SessionRecorder
 
 
 @dataclass(frozen=True)
@@ -166,25 +166,35 @@ class Guard:
             self._fingerprint = f"sha256:{digest}"
         return self._fingerprint
 
-    def session(self, seed: Iterable[Entity] = (), *, validate_seed: bool = True) -> "Session":
+    def session(
+        self,
+        seed: Iterable[Entity] = (),
+        *,
+        validate_seed: bool = True,
+        recorder: "SessionRecorder | None" = None,
+    ) -> "Session":
         """Open a session, grounding ``seed`` instances as trusted facts.
 
         The seed is checked against the lore by default (``LoreError`` on
         reject-severity violations); pass ``validate_seed=False`` to skip.
         Skipping means seed inconsistencies are trusted silently — including
         an id typed under two incomparable classes, which rehydrates as just
-        one of them with the other branch's rules skipped.
+        one of them with the other branch's rules skipped. ``recorder``
+        (e.g. ``lore.viz.TraceRecorder``) observes every transaction for
+        later visualization.
         """
         from .session import Session
 
-        return Session(self, seed=seed, validate_seed=validate_seed)
+        return Session(self, seed=seed, validate_seed=validate_seed, recorder=recorder)
 
-    def restore(self, blob: str | bytes) -> "Session":
+    def restore(
+        self, blob: str | bytes, *, recorder: "SessionRecorder | None" = None
+    ) -> "Session":
         """Rehydrate a session from a :meth:`~lore.session.Session.snapshot`
         blob (see there for the durability contract)."""
         from .session import Session
 
-        return Session.restore(self, blob)
+        return Session.restore(self, blob, recorder=recorder)
 
     def to_context(self) -> str:
         """Render the lore as plain English for a system prompt.

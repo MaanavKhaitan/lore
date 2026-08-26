@@ -4,11 +4,22 @@ Seeds a session with a small world, then scripts four proposals an agent might
 make and prints each verdict plus the repair prompt that would be fed back.
 
 Run:  python examples/commerce/demo.py
+      python examples/commerce/demo.py --html commerce.html   # + the viz export
 """
+
+import argparse
+
+from lore.viz import TraceRecorder, to_html
 
 from world import Customer, Order, Refund, SupportRep, guard
 
+parser = argparse.ArgumentParser(description="The double-refund demo.")
+parser.add_argument("--html", metavar="PATH", help="export the run as a self-contained HTML viewer")
+args = parser.parse_args()
+
+recorder = TraceRecorder()
 session = guard.session(
+    recorder=recorder,
     seed=[
         Customer(id="cust_1", name="Ada"),
         SupportRep(id="rep_1", name="Sam"),
@@ -53,3 +64,7 @@ for i, (title, refund) in enumerate(PROPOSALS, start=1):
     for line in verdict.repair_prompt().splitlines():
         print(f"      {line}")
     print()
+
+session.rollback()  # leave no dangling proposal (also closes the trace cleanly)
+if args.html:
+    print(f"wrote {to_html(guard, trace=recorder, out=args.html)}")
