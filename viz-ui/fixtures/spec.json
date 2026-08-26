@@ -1,0 +1,753 @@
+{
+  "format": 1,
+  "kind": "lore-spec",
+  "lore": "contracts",
+  "fingerprint": "sha256:fcec4442c837012ef48d933ae6440647ba6d393b0645fd0bc580abf01465798a",
+  "classes": [
+    {
+      "name": "Party",
+      "parents": [],
+      "doc": null,
+      "fields": [
+        {
+          "kind": "attr",
+          "name": "name",
+          "attr": "Party.name",
+          "type": "str",
+          "oneOf": null,
+          "severity": "reject",
+          "required": true,
+          "default": null,
+          "inheritedFrom": null
+        }
+      ]
+    },
+    {
+      "name": "ClauseTemplate",
+      "parents": [],
+      "doc": "The approved clause library (seeded). Every drafted clause must\ninstantiate one of these.",
+      "fields": [
+        {
+          "kind": "attr",
+          "name": "title",
+          "attr": "ClauseTemplate.title",
+          "type": "str",
+          "oneOf": null,
+          "severity": "reject",
+          "required": true,
+          "default": null,
+          "inheritedFrom": null
+        }
+      ]
+    },
+    {
+      "name": "Contract",
+      "parents": [],
+      "doc": null,
+      "fields": [
+        {
+          "kind": "attr",
+          "name": "name",
+          "attr": "Contract.name",
+          "type": "str",
+          "oneOf": null,
+          "severity": "reject",
+          "required": true,
+          "default": null,
+          "inheritedFrom": null
+        }
+      ]
+    },
+    {
+      "name": "Section",
+      "parents": [],
+      "doc": null,
+      "fields": [
+        {
+          "kind": "attr",
+          "name": "heading",
+          "attr": "Section.heading",
+          "type": "str",
+          "oneOf": null,
+          "severity": "reject",
+          "required": true,
+          "default": null,
+          "inheritedFrom": null
+        },
+        {
+          "kind": "relation",
+          "name": "parent_section",
+          "predicate": "Section.parent_section",
+          "target": "Section",
+          "many": false,
+          "required": false,
+          "inheritedFrom": null
+        }
+      ]
+    },
+    {
+      "name": "DefinedTerm",
+      "parents": [],
+      "doc": null,
+      "fields": [
+        {
+          "kind": "attr",
+          "name": "term",
+          "attr": "DefinedTerm.term",
+          "type": "str",
+          "oneOf": null,
+          "severity": "reject",
+          "required": true,
+          "default": null,
+          "inheritedFrom": null
+        },
+        {
+          "kind": "attr",
+          "name": "definition",
+          "attr": "DefinedTerm.definition",
+          "type": "str",
+          "oneOf": null,
+          "severity": "reject",
+          "required": true,
+          "default": null,
+          "inheritedFrom": null
+        }
+      ]
+    },
+    {
+      "name": "Clause",
+      "parents": [],
+      "doc": null,
+      "fields": [
+        {
+          "kind": "attr",
+          "name": "text",
+          "attr": "Clause.text",
+          "type": "str",
+          "oneOf": null,
+          "severity": "reject",
+          "required": true,
+          "default": null,
+          "inheritedFrom": null
+        },
+        {
+          "kind": "relation",
+          "name": "based_on",
+          "predicate": "Clause.based_on",
+          "target": "ClauseTemplate",
+          "many": false,
+          "required": true,
+          "inheritedFrom": null
+        },
+        {
+          "kind": "relation",
+          "name": "in_section",
+          "predicate": "Clause.in_section",
+          "target": "Section",
+          "many": false,
+          "required": true,
+          "inheritedFrom": null
+        },
+        {
+          "kind": "relation",
+          "name": "uses_terms",
+          "predicate": "Clause.uses_terms",
+          "target": "DefinedTerm",
+          "many": true,
+          "required": false,
+          "inheritedFrom": null
+        },
+        {
+          "kind": "relation",
+          "name": "references",
+          "predicate": "Clause.references",
+          "target": "Section",
+          "many": false,
+          "required": false,
+          "inheritedFrom": null
+        }
+      ]
+    },
+    {
+      "name": "GoverningLawClause",
+      "parents": [
+        "Clause"
+      ],
+      "doc": null,
+      "fields": [
+        {
+          "kind": "attr",
+          "name": "text",
+          "attr": "Clause.text",
+          "type": "str",
+          "oneOf": null,
+          "severity": "reject",
+          "required": true,
+          "default": null,
+          "inheritedFrom": "Clause"
+        },
+        {
+          "kind": "relation",
+          "name": "based_on",
+          "predicate": "Clause.based_on",
+          "target": "ClauseTemplate",
+          "many": false,
+          "required": true,
+          "inheritedFrom": "Clause"
+        },
+        {
+          "kind": "relation",
+          "name": "in_section",
+          "predicate": "Clause.in_section",
+          "target": "Section",
+          "many": false,
+          "required": true,
+          "inheritedFrom": "Clause"
+        },
+        {
+          "kind": "relation",
+          "name": "uses_terms",
+          "predicate": "Clause.uses_terms",
+          "target": "DefinedTerm",
+          "many": true,
+          "required": false,
+          "inheritedFrom": "Clause"
+        },
+        {
+          "kind": "relation",
+          "name": "references",
+          "predicate": "Clause.references",
+          "target": "Section",
+          "many": false,
+          "required": false,
+          "inheritedFrom": "Clause"
+        },
+        {
+          "kind": "attr",
+          "name": "law",
+          "attr": "GoverningLawClause.law",
+          "type": "str",
+          "oneOf": [
+            "DE",
+            "NY"
+          ],
+          "severity": "reject",
+          "required": true,
+          "default": null,
+          "inheritedFrom": null
+        },
+        {
+          "kind": "relation",
+          "name": "governs",
+          "predicate": "GoverningLawClause.governs",
+          "target": "Contract",
+          "many": false,
+          "required": true,
+          "inheritedFrom": null
+        }
+      ]
+    },
+    {
+      "name": "FeeClause",
+      "parents": [
+        "Clause"
+      ],
+      "doc": null,
+      "fields": [
+        {
+          "kind": "attr",
+          "name": "text",
+          "attr": "Clause.text",
+          "type": "str",
+          "oneOf": null,
+          "severity": "reject",
+          "required": true,
+          "default": null,
+          "inheritedFrom": "Clause"
+        },
+        {
+          "kind": "relation",
+          "name": "based_on",
+          "predicate": "Clause.based_on",
+          "target": "ClauseTemplate",
+          "many": false,
+          "required": true,
+          "inheritedFrom": "Clause"
+        },
+        {
+          "kind": "relation",
+          "name": "in_section",
+          "predicate": "Clause.in_section",
+          "target": "Section",
+          "many": false,
+          "required": true,
+          "inheritedFrom": "Clause"
+        },
+        {
+          "kind": "relation",
+          "name": "uses_terms",
+          "predicate": "Clause.uses_terms",
+          "target": "DefinedTerm",
+          "many": true,
+          "required": false,
+          "inheritedFrom": "Clause"
+        },
+        {
+          "kind": "relation",
+          "name": "references",
+          "predicate": "Clause.references",
+          "target": "Section",
+          "many": false,
+          "required": false,
+          "inheritedFrom": "Clause"
+        },
+        {
+          "kind": "relation",
+          "name": "for_contract",
+          "predicate": "FeeClause.for_contract",
+          "target": "Contract",
+          "many": false,
+          "required": true,
+          "inheritedFrom": null
+        },
+        {
+          "kind": "attr",
+          "name": "monthly_fee_cents",
+          "attr": "FeeClause.monthly_fee_cents",
+          "type": "int",
+          "oneOf": null,
+          "severity": "reject",
+          "required": true,
+          "default": null,
+          "inheritedFrom": null
+        }
+      ]
+    },
+    {
+      "name": "LiabilityCapClause",
+      "parents": [
+        "Clause"
+      ],
+      "doc": null,
+      "fields": [
+        {
+          "kind": "attr",
+          "name": "text",
+          "attr": "Clause.text",
+          "type": "str",
+          "oneOf": null,
+          "severity": "reject",
+          "required": true,
+          "default": null,
+          "inheritedFrom": "Clause"
+        },
+        {
+          "kind": "relation",
+          "name": "based_on",
+          "predicate": "Clause.based_on",
+          "target": "ClauseTemplate",
+          "many": false,
+          "required": true,
+          "inheritedFrom": "Clause"
+        },
+        {
+          "kind": "relation",
+          "name": "in_section",
+          "predicate": "Clause.in_section",
+          "target": "Section",
+          "many": false,
+          "required": true,
+          "inheritedFrom": "Clause"
+        },
+        {
+          "kind": "relation",
+          "name": "uses_terms",
+          "predicate": "Clause.uses_terms",
+          "target": "DefinedTerm",
+          "many": true,
+          "required": false,
+          "inheritedFrom": "Clause"
+        },
+        {
+          "kind": "relation",
+          "name": "references",
+          "predicate": "Clause.references",
+          "target": "Section",
+          "many": false,
+          "required": false,
+          "inheritedFrom": "Clause"
+        },
+        {
+          "kind": "relation",
+          "name": "caps",
+          "predicate": "LiabilityCapClause.caps",
+          "target": "Contract",
+          "many": false,
+          "required": true,
+          "inheritedFrom": null
+        },
+        {
+          "kind": "attr",
+          "name": "cap_cents",
+          "attr": "LiabilityCapClause.cap_cents",
+          "type": "int",
+          "oneOf": null,
+          "severity": "reject",
+          "required": true,
+          "default": null,
+          "inheritedFrom": null
+        }
+      ]
+    },
+    {
+      "name": "IndemnityClause",
+      "parents": [
+        "Clause"
+      ],
+      "doc": null,
+      "fields": [
+        {
+          "kind": "attr",
+          "name": "text",
+          "attr": "Clause.text",
+          "type": "str",
+          "oneOf": null,
+          "severity": "reject",
+          "required": true,
+          "default": null,
+          "inheritedFrom": "Clause"
+        },
+        {
+          "kind": "relation",
+          "name": "based_on",
+          "predicate": "Clause.based_on",
+          "target": "ClauseTemplate",
+          "many": false,
+          "required": true,
+          "inheritedFrom": "Clause"
+        },
+        {
+          "kind": "relation",
+          "name": "in_section",
+          "predicate": "Clause.in_section",
+          "target": "Section",
+          "many": false,
+          "required": true,
+          "inheritedFrom": "Clause"
+        },
+        {
+          "kind": "relation",
+          "name": "uses_terms",
+          "predicate": "Clause.uses_terms",
+          "target": "DefinedTerm",
+          "many": true,
+          "required": false,
+          "inheritedFrom": "Clause"
+        },
+        {
+          "kind": "relation",
+          "name": "references",
+          "predicate": "Clause.references",
+          "target": "Section",
+          "many": false,
+          "required": false,
+          "inheritedFrom": "Clause"
+        },
+        {
+          "kind": "relation",
+          "name": "indemnitor",
+          "predicate": "IndemnityClause.indemnitor",
+          "target": "Party",
+          "many": false,
+          "required": true,
+          "inheritedFrom": null
+        },
+        {
+          "kind": "relation",
+          "name": "indemnitee",
+          "predicate": "IndemnityClause.indemnitee",
+          "target": "Party",
+          "many": false,
+          "required": true,
+          "inheritedFrom": null
+        }
+      ]
+    },
+    {
+      "name": "MFNClause",
+      "parents": [
+        "Clause"
+      ],
+      "doc": "Most-favored-nation commitment \u2014 no extra shape; the always-flag rule\nbelow is what makes it special.",
+      "fields": [
+        {
+          "kind": "attr",
+          "name": "text",
+          "attr": "Clause.text",
+          "type": "str",
+          "oneOf": null,
+          "severity": "reject",
+          "required": true,
+          "default": null,
+          "inheritedFrom": "Clause"
+        },
+        {
+          "kind": "relation",
+          "name": "based_on",
+          "predicate": "Clause.based_on",
+          "target": "ClauseTemplate",
+          "many": false,
+          "required": true,
+          "inheritedFrom": "Clause"
+        },
+        {
+          "kind": "relation",
+          "name": "in_section",
+          "predicate": "Clause.in_section",
+          "target": "Section",
+          "many": false,
+          "required": true,
+          "inheritedFrom": "Clause"
+        },
+        {
+          "kind": "relation",
+          "name": "uses_terms",
+          "predicate": "Clause.uses_terms",
+          "target": "DefinedTerm",
+          "many": true,
+          "required": false,
+          "inheritedFrom": "Clause"
+        },
+        {
+          "kind": "relation",
+          "name": "references",
+          "predicate": "Clause.references",
+          "target": "Section",
+          "many": false,
+          "required": false,
+          "inheritedFrom": "Clause"
+        }
+      ]
+    }
+  ],
+  "relations": [
+    {
+      "predicate": "Section.parent_section",
+      "owner": "Section",
+      "field": "parent_section",
+      "target": "Section",
+      "many": false,
+      "maxPerTarget": null,
+      "severity": "reject",
+      "transitive": true,
+      "symmetric": false,
+      "asymmetric": false,
+      "irreflexive": true,
+      "inverse": null
+    },
+    {
+      "predicate": "Clause.based_on",
+      "owner": "Clause",
+      "field": "based_on",
+      "target": "ClauseTemplate",
+      "many": false,
+      "maxPerTarget": null,
+      "severity": "reject",
+      "transitive": false,
+      "symmetric": false,
+      "asymmetric": false,
+      "irreflexive": false,
+      "inverse": null
+    },
+    {
+      "predicate": "Clause.in_section",
+      "owner": "Clause",
+      "field": "in_section",
+      "target": "Section",
+      "many": false,
+      "maxPerTarget": null,
+      "severity": "reject",
+      "transitive": false,
+      "symmetric": false,
+      "asymmetric": false,
+      "irreflexive": false,
+      "inverse": null
+    },
+    {
+      "predicate": "Clause.uses_terms",
+      "owner": "Clause",
+      "field": "uses_terms",
+      "target": "DefinedTerm",
+      "many": true,
+      "maxPerTarget": null,
+      "severity": "reject",
+      "transitive": false,
+      "symmetric": false,
+      "asymmetric": false,
+      "irreflexive": false,
+      "inverse": null
+    },
+    {
+      "predicate": "Clause.references",
+      "owner": "Clause",
+      "field": "references",
+      "target": "Section",
+      "many": false,
+      "maxPerTarget": null,
+      "severity": "reject",
+      "transitive": false,
+      "symmetric": false,
+      "asymmetric": false,
+      "irreflexive": false,
+      "inverse": null
+    },
+    {
+      "predicate": "GoverningLawClause.governs",
+      "owner": "GoverningLawClause",
+      "field": "governs",
+      "target": "Contract",
+      "many": false,
+      "maxPerTarget": 1,
+      "severity": "reject",
+      "transitive": false,
+      "symmetric": false,
+      "asymmetric": false,
+      "irreflexive": false,
+      "inverse": null
+    },
+    {
+      "predicate": "FeeClause.for_contract",
+      "owner": "FeeClause",
+      "field": "for_contract",
+      "target": "Contract",
+      "many": false,
+      "maxPerTarget": 1,
+      "severity": "reject",
+      "transitive": false,
+      "symmetric": false,
+      "asymmetric": false,
+      "irreflexive": false,
+      "inverse": null
+    },
+    {
+      "predicate": "LiabilityCapClause.caps",
+      "owner": "LiabilityCapClause",
+      "field": "caps",
+      "target": "Contract",
+      "many": false,
+      "maxPerTarget": 1,
+      "severity": "reject",
+      "transitive": false,
+      "symmetric": false,
+      "asymmetric": false,
+      "irreflexive": false,
+      "inverse": null
+    },
+    {
+      "predicate": "IndemnityClause.indemnitor",
+      "owner": "IndemnityClause",
+      "field": "indemnitor",
+      "target": "Party",
+      "many": false,
+      "maxPerTarget": null,
+      "severity": "reject",
+      "transitive": false,
+      "symmetric": false,
+      "asymmetric": false,
+      "irreflexive": false,
+      "inverse": null
+    },
+    {
+      "predicate": "IndemnityClause.indemnitee",
+      "owner": "IndemnityClause",
+      "field": "indemnitee",
+      "target": "Party",
+      "many": false,
+      "maxPerTarget": null,
+      "severity": "reject",
+      "transitive": false,
+      "symmetric": false,
+      "asymmetric": false,
+      "irreflexive": false,
+      "inverse": null
+    }
+  ],
+  "inversePairs": [],
+  "disjointPairs": [],
+  "rules": [
+    {
+      "name": "liability_cap_meets_floor",
+      "message": "Liability cap in {obj.id} is below the playbook floor of 12 months of fees.",
+      "plain": "Never: Liability cap in {id} is below the playbook floor of 12 months of fees.",
+      "doc": "The walk-away floor: the cap must cover 12 months of fees.\n\nOrdering: at proposal time this rule sees only fee clauses already in\nthe graph, so a cap drafted against an empty fee schedule passes\nvacuously \u2014 and committed facts are immutable, so it could never be\nrepaired (a live agent found this wedge). Two layers close it: the\nengine re-checks committed caps differentially (a later fee that would\nflip this rule is itself rejected), and the companion rule below rejects\nthe cap-before-fees ordering outright \u2014 rejecting the actual mistake\nbeats rejecting the fee the deal memo requires. The caps_cover_fees goal\nbelow re-checks the floor at the output boundary as a belt-and-suspenders.",
+      "severity": "reject",
+      "target": "LiabilityCapClause"
+    },
+    {
+      "name": "liability_cap_follows_fee_schedule",
+      "message": "Liability cap {obj.id} was drafted before any fee clause \u2014 draft the fee schedule first, then cap liability against it.",
+      "plain": "Never: Liability cap {id} was drafted before any fee clause \u2014 draft the fee schedule first, then cap liability against it.",
+      "doc": null,
+      "severity": "reject",
+      "target": "LiabilityCapClause"
+    },
+    {
+      "name": "fee_is_positive",
+      "message": "Fee clause {obj.id} has a non-positive monthly fee.",
+      "plain": "Never: Fee clause {id} has a non-positive monthly fee.",
+      "doc": null,
+      "severity": "reject",
+      "target": "FeeClause"
+    },
+    {
+      "name": "mfn_needs_counsel_review",
+      "message": "MFN clause {obj.id} is allowed but requires counsel review before signature.",
+      "plain": "Never: MFN clause {id} is allowed but requires counsel review before signature. (advisory: flagged, not rejected)",
+      "doc": null,
+      "severity": "flag",
+      "target": "MFNClause"
+    },
+    {
+      "name": "indemnitor_is_not_indemnitee",
+      "message": "Indemnity clause {obj.id} names {obj.indemnitor} as both indemnitor and indemnitee.",
+      "plain": "Never: Indemnity clause {id} names {indemnitor} as both indemnitor and indemnitee.",
+      "doc": null,
+      "severity": "reject",
+      "target": "IndemnityClause"
+    }
+  ],
+  "goals": [
+    {
+      "name": "has_governing_law",
+      "message": "Contract {obj.id} has no governing-law clause.",
+      "plain": "Never finish while: Contract {id} has no governing-law clause.",
+      "doc": null,
+      "severity": "reject",
+      "target": "Contract"
+    },
+    {
+      "name": "has_fee_schedule",
+      "message": "Contract {obj.id} has no fee clause.",
+      "plain": "Never finish while: Contract {id} has no fee clause.",
+      "doc": null,
+      "severity": "reject",
+      "target": "Contract"
+    },
+    {
+      "name": "has_liability_cap",
+      "message": "Contract {obj.id} has no limitation-of-liability clause.",
+      "plain": "Never finish while: Contract {id} has no limitation-of-liability clause.",
+      "doc": null,
+      "severity": "reject",
+      "target": "Contract"
+    },
+    {
+      "name": "caps_cover_fees",
+      "message": "A liability cap on {obj.id} is below the playbook floor of 12 months of fees.",
+      "plain": "Never finish while: A liability cap on {id} is below the playbook floor of 12 months of fees.",
+      "doc": null,
+      "severity": "reject",
+      "target": "Contract"
+    }
+  ]
+}

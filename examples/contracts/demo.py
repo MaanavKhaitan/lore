@@ -10,7 +10,15 @@ MFN escalation commits with a flag; session.check_goals() checks at the
 output boundary what no per-proposal rule can.
 
 Run:  python examples/contracts/demo.py
+      python examples/contracts/demo.py --html contracts.html   # + the viz export
+      python examples/contracts/demo.py --json viz-ui/fixtures  # + viewer payloads
 """
+
+import argparse
+import json
+from pathlib import Path
+
+from lore.viz import TraceRecorder, spec_json, to_html
 
 from world import (
     Clause,
@@ -27,7 +35,14 @@ from world import (
     guard,
 )
 
+parser = argparse.ArgumentParser(description="The playbook-enforcement demo.")
+parser.add_argument("--html", metavar="PATH", help="export the run as a self-contained HTML viewer")
+parser.add_argument("--json", metavar="DIR", help="write spec/trace/snapshot JSON payloads (viz-ui fixtures)")
+args = parser.parse_args()
+
+recorder = TraceRecorder()
 session = guard.session(
+    recorder=recorder,
     seed=[
         Contract(id="contract_1", name="Acme–Vendor Master Services Agreement"),
         Party(id="party_acme", name="Acme Corp"),
@@ -259,3 +274,15 @@ print("    Had the agent finished after beat 7 — no fee schedule, no cap —")
 print("    the same call would have fed back:")
 for line in guard.restore(mid_draft).check_goals().repair_prompt().splitlines():
     print(f"      {line}")
+
+# --- optional viz exports (printed output above is unchanged without flags) -----
+if args.json:
+    out_dir = Path(args.json)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    snapshot_blob = session.snapshot()
+    (out_dir / "spec.json").write_text(json.dumps(spec_json(guard), indent=2))
+    (out_dir / "trace.json").write_text(recorder.dumps())
+    (out_dir / "snapshot.json").write_text(snapshot_blob)
+    print(f"\nwrote spec.json, trace.json, snapshot.json to {out_dir}/")
+if args.html:
+    print(f"\nwrote {to_html(guard, trace=recorder, out=args.html)}")
