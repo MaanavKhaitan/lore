@@ -222,11 +222,11 @@ to_html(guard, trace=recorder, out="run.html")
   expand a rejection to see the exact repair prompt the agent got, plus the
   violation drawn on the graph — the proposed facts dashed, the offending
   path in red.
-- **State** — the committed world as a graph, with a scrubber that replays it
-  growing step by step.
+- **Playback** — the committed world as a graph, with a scrubber that replays
+  it growing step by step.
 
 Production debugging needs no trace: `to_html(guard, snapshot=blob,
-out="state.html")` renders the State view straight from a persisted
+out="state.html")` renders the Playback view straight from a persisted
 `session.snapshot()` blob. There's a CLI too:
 
 ```bash

@@ -17,10 +17,12 @@ export function App({ spec, trace, snapshot }: AppProps) {
   // full: trace present (World + Timeline + State). snapshot: blob only
   // (World + State, no scrubber). world: schema only.
   const mode = trace ? "full" : snapshot ? "snapshot" : "world";
-  // #world / #timeline / #state deep-links a tab (handy for sharing too).
-  const fromHash = window.location.hash.slice(1);
+  // #world / #timeline / #playback deep-links a tab (handy for sharing too;
+  // #state is the old name for playback, kept working).
+  const rawHash = window.location.hash.slice(1);
+  const fromHash = rawHash === "state" ? "playback" : rawHash;
   const [tab, setTab] = useState(
-    ["world", "timeline", "state"].includes(fromHash) ? fromHash : "world",
+    ["world", "timeline", "playback"].includes(fromHash) ? fromHash : "world",
   );
 
   const colors = useMemo(() => assignClassColors(spec), [spec]);
@@ -49,7 +51,7 @@ export function App({ spec, trace, snapshot }: AppProps) {
   const tabs = [
     { id: "world", label: "World" },
     ...(mode === "full" ? [{ id: "timeline", label: "Timeline" }] : []),
-    ...(mode !== "world" ? [{ id: "state", label: "State" }] : []),
+    ...(mode !== "world" ? [{ id: "playback", label: "Playback" }] : []),
   ];
 
   return (
@@ -57,6 +59,7 @@ export function App({ spec, trace, snapshot }: AppProps) {
       <style>{colorCss}</style>
       <header className="app-header">
         <h1>lore</h1>
+        <span className="header-domain">{spec.lore}</span>
       </header>
       {staleData && (
         <div className="banner-warn" role="alert">
@@ -67,8 +70,8 @@ export function App({ spec, trace, snapshot }: AppProps) {
       <Tabs tabs={tabs} active={tab} onSelect={setTab} />
       {tab === "world" && <WorldTab spec={spec} />}
       {tab === "timeline" && world && trace && <TimelineTab spec={spec} replay={world} />}
-      {tab === "state" && world && (
-        <StateTab spec={spec} facts={world.facts} maxStep={world.maxStep} scrubbable={mode === "full"} />
+      {tab === "playback" && world && (
+        <StateTab spec={spec} facts={world.facts} maxStep={world.maxStep} scrubbable />
       )}
     </div>
   );
