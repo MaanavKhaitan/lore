@@ -243,9 +243,8 @@ svg.graph {
   margin-bottom: 18px;
 }
 .rule-cards h3 {
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: 13px;
+  font-weight: 600;
   color: var(--ink-2);
   margin: 0 0 8px;
 }
@@ -393,9 +392,8 @@ svg.graph {
 .violation-detail h4,
 .node-panel h4 {
   margin: 0 0 6px;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--ink-2);
 }
 .repair pre {
