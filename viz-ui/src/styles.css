@@ -48,7 +48,7 @@ body {
   min-height: 100vh;
   background: var(--page);
   color: var(--ink);
-  font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   font-size: 14px;
   line-height: 1.45;
   padding: 0 20px 40px;

@@ -88,12 +88,21 @@ export function buildGraph(
   });
 
   // Ghost nodes for dangling references, so existence violations are visible.
+  // They inherit the referencing edge's step: a ghost must not predate the
+  // edge that conjures it (the scrubber would show it "as seeded" otherwise).
   const known = new Set(nodes.map((n) => n.id));
   for (const edge of edges) {
     for (const id of [edge.subject, edge.object]) {
       if (!known.has(id)) {
         known.add(id);
-        nodes.push({ id, cls: "?", seed: false, step: 0, ghost: true, proposed: edge.proposed });
+        nodes.push({
+          id,
+          cls: "?",
+          seed: false,
+          step: edge.step,
+          ghost: true,
+          proposed: edge.proposed,
+        });
       }
     }
   }

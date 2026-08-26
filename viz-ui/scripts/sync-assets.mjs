@@ -9,6 +9,13 @@ const here = dirname(fileURLToPath(import.meta.url));
 const dist = join(here, "..", "dist");
 const assets = join(here, "..", "..", "src", "lore", "viz", "assets");
 
+// html.py inlines these verbatim into <script>/<style> blocks; a literal
+// terminator inside them would silently truncate every exported page.
+for (const [name, terminator] of [["viz.js", "</script"], ["viz.css", "</style"]]) {
+  if (readFileSync(join(dist, name), "utf8").includes(terminator)) {
+    throw new Error(`sync-assets: ${name} contains a literal "${terminator}" — it would truncate exported HTML`);
+  }
+}
 copyFileSync(join(dist, "viz.js"), join(assets, "viz.js"));
 copyFileSync(join(dist, "viz.css"), join(assets, "viz.css"));
 

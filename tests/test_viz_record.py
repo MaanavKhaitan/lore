@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from lore import Entity, Graph, Lore, LoreViolation, Relation, relation
+from lore import Entity, Graph, Lore, LoreError, LoreViolation, Relation, relation
 from lore.viz import TRACE_FORMAT, TraceRecorder
 
 lore = Lore("viz-record-test")
@@ -119,6 +119,23 @@ def test_implicit_rollback_between_bare_proposes_is_recorded():
     session.propose(Refund(id="ref_1", amount=40.0, refunds="ord_1"))  # ok
     session.commit()
     assert kinds(recorder) == ["session_start", "propose", "rollback", "propose", "commit"]
+
+
+def test_failed_propose_emits_no_phantom_rollback():
+    # A propose that raises during grounding (unregistered entity) must leave
+    # the pending proposal AND the trace untouched: a rollback emitted before
+    # grounding would record a discard that never happened, and the surviving
+    # proposal's commit would then vanish from the replay.
+    class Unregistered(Entity):
+        pass
+
+    session, recorder = recorded_session()
+    session.propose(Refund(id="ref_1", amount=40.0, refunds="ord_1"))
+    with pytest.raises(LoreError):
+        session.propose(Unregistered(id="huh"))
+    session.commit()  # the pending ref_1 proposal is still alive
+    assert kinds(recorder) == ["session_start", "propose", "commit"]
+    assert replay(recorder.events) == json.loads(session.snapshot())["facts"]
 
 
 def test_rollback_without_a_proposal_is_silent():

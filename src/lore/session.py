@@ -97,8 +97,6 @@ class Session:
         Any previously staged (uncommitted) facts are discarded first — an
         implicit rollback, which is exactly right for agent retry loops.
         """
-        if self._staged is not None:
-            self._emit("rollback")  # the implicit rollback, made visible to recorders
         staged: list[Fact] = []
         for obj in objs:
             for fact in ground(self._guard, obj, "asserted"):
@@ -116,6 +114,11 @@ class Session:
         verdict = Verdict(
             run_checks(build_context(self._guard, view, staged, base=self._committed))
         )
+        # The implicit rollback is emitted only here, where the prior staged
+        # facts are actually discarded — never before grounding/checks, which
+        # can raise and leave the old proposal (and the session) untouched.
+        if self._staged is not None:
+            self._emit("rollback")
         self._staged = staged
         self._staged_store = staged_store
         self._last_verdict = verdict

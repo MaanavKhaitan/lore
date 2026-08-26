@@ -17,12 +17,18 @@ export function App({ spec, trace, snapshot }: AppProps) {
   // full: trace present (World + Timeline + State). snapshot: blob only
   // (World + State, no scrubber). world: schema only.
   const mode = trace ? "full" : snapshot ? "snapshot" : "world";
+  const tabs = [
+    { id: "world", label: "World" },
+    ...(mode === "full" ? [{ id: "timeline", label: "Timeline" }] : []),
+    ...(mode !== "world" ? [{ id: "playback", label: "Playback" }] : []),
+  ];
   // #world / #timeline / #playback deep-links a tab (handy for sharing too;
-  // #state is the old name for playback, kept working).
+  // #state is the old name for playback, kept working). Only tabs this
+  // export actually has count — a stray hash must not select a blank panel.
   const rawHash = window.location.hash.slice(1);
   const fromHash = rawHash === "state" ? "playback" : rawHash;
   const [tab, setTab] = useState(
-    ["world", "timeline", "playback"].includes(fromHash) ? fromHash : "world",
+    tabs.some((t) => t.id === fromHash) ? fromHash : "world",
   );
 
   const colors = useMemo(() => assignClassColors(spec), [spec]);
@@ -47,12 +53,6 @@ export function App({ spec, trace, snapshot }: AppProps) {
   const staleData =
     (trace && trace.fingerprint !== spec.fingerprint) ||
     (snapshot && snapshot.fingerprint !== spec.fingerprint);
-
-  const tabs = [
-    { id: "world", label: "World" },
-    ...(mode === "full" ? [{ id: "timeline", label: "Timeline" }] : []),
-    ...(mode !== "world" ? [{ id: "playback", label: "Playback" }] : []),
-  ];
 
   return (
     <div className="viz-root">
