@@ -55,9 +55,9 @@ interface Presentation {
 function present(row: Row): Presentation {
   switch (row.kind) {
     case "seeded":
-      return { tone: "muted", title: "World seeded", detail: entitySummary(row.facts) };
+      return { tone: "muted", title: "World seeded", detail: "" };
     case "restored":
-      return { tone: "muted", title: "Session restored", detail: entitySummary(row.facts) };
+      return { tone: "muted", title: "Session restored", detail: "" };
     case "committed":
       if (row.step === null)
         return { tone: "muted", title: "Nothing new to commit", detail: "" };
