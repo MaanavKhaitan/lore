@@ -6,9 +6,10 @@ import { ClassCard, cardSize } from "./ClassCard";
 import { RuleCards } from "./RuleCards";
 
 /** The World tab: an ERD-style map of the declared world — one card per
- * entity class, solid arrows for relations (badged in plain English), dashed
- * "is a" links for inheritance and "never both" links for disjointness — with
- * the rules and goals as clickable plain-English cards alongside. */
+ * entity class, arrows for relations — with the rules and goals as clickable
+ * plain-English cards alongside. Inheritance lives on the card header ("a
+ * kind of Clause") and disjointness in the rules panel, not as extra edges:
+ * one encoding each keeps the diagram quiet. */
 export function WorldTab({ spec }: { spec: Spec }) {
   // A selected rule highlights its target class and every subclass of it.
   const [selectedRule, setSelectedRule] = useState<string | null>(null);
@@ -23,38 +24,36 @@ export function WorldTab({ spec }: { spec: Spec }) {
     );
   }, [selectedRule, spec]);
 
+  // Relation constraints render on the owner card's field line, so edges
+  // carry just the field name ("many" already shows as "(zero or more)").
+  const badges = useMemo(
+    () =>
+      new Map(
+        spec.relations.map((rel) => [
+          rel.predicate,
+          relationBadges(rel)
+            .filter((b) => b !== "zero or more")
+            .join(" · "),
+        ]),
+      ),
+    [spec],
+  );
+
   const layout = useMemo(() => {
     const pad = (n: number) => String(n).padStart(3, "0");
-    const classIndex = new Map(spec.classes.map((c, i) => [c.name, i]));
     const nodes = spec.classes.map((cls, i) => ({
       id: cls.name,
-      ...cardSize(cls),
+      ...cardSize(cls, badges),
       sort: pad(i),
     }));
-    const edges = [
-      ...spec.relations.map((rel, i) => ({
-        id: `rel:${rel.predicate}`,
-        from: rel.owner,
-        to: rel.target,
-        sort: `1|${pad(i)}`,
-      })),
-      ...spec.classes
-        .filter((c) => c.parents.length > 0)
-        .map((c) => ({
-          id: `isa:${c.name}`,
-          from: c.name,
-          to: c.parents[0],
-          sort: `2|${pad(classIndex.get(c.name) ?? 999)}`,
-        })),
-      ...spec.disjointPairs.map(([a, b], i) => ({
-        id: `dis:${a}|${b}`,
-        from: a,
-        to: b,
-        sort: `3|${pad(i)}`,
-      })),
-    ];
+    const edges = spec.relations.map((rel, i) => ({
+      id: `rel:${rel.predicate}`,
+      from: rel.owner,
+      to: rel.target,
+      sort: pad(i),
+    }));
     return runLayout(nodes, edges, { rankdir: "LR", ranksep: 90, nodesep: 32 });
-  }, [spec]);
+  }, [spec, badges]);
 
   const relByPredicate = new Map(spec.relations.map((r) => [r.predicate, r]));
   const dimming = highlightedClasses.size > 0;
@@ -73,21 +72,21 @@ export function WorldTab({ spec }: { spec: Spec }) {
             if (!points.length) return null;
             const d = points.map((p, i) => `${i ? "L" : "M"}${p.x},${p.y}`).join(" ");
             const mid = points[Math.floor(points.length / 2)];
-            const [kind, key] = [id.slice(0, id.indexOf(":")), id.slice(id.indexOf(":") + 1)];
-            const rel = kind === "rel" ? relByPredicate.get(key) : undefined;
-            const label = rel ? rel.field : kind === "isa" ? "is a" : "never both";
-            const badges = rel ? relationBadges(rel).join(" · ") : "";
+            const rel = relByPredicate.get(id.slice("rel:".length));
+            // Self-loop labels sit to the right of the arc, not centered on it
+            // (centered, they'd overlap the card itself).
+            const loop = rel && rel.owner === rel.target;
             return (
-              <g key={id} className={["edge", "world-edge", kind !== "rel" && "meta", dimming && "dim"].filter(Boolean).join(" ")}>
-                <path d={d} markerEnd={kind === "dis" ? undefined : "url(#w-arrow)"} />
-                <text x={mid.x} y={mid.y - 6} textAnchor="middle" className="edge-label">
-                  {label}
+              <g key={id} className={["edge", "world-edge", dimming && "dim"].filter(Boolean).join(" ")}>
+                <path d={d} markerEnd="url(#w-arrow)" />
+                <text
+                  x={loop ? mid.x + 8 : mid.x}
+                  y={mid.y - (loop ? -4 : 6)}
+                  textAnchor={loop ? "start" : "middle"}
+                  className="edge-label"
+                >
+                  {rel?.field ?? ""}
                 </text>
-                {badges && (
-                  <text x={mid.x} y={mid.y + 8} textAnchor="middle" className="edge-badges">
-                    {badges}
-                  </text>
-                )}
               </g>
             );
           })}
@@ -98,6 +97,7 @@ export function WorldTab({ spec }: { spec: Spec }) {
               <ClassCard
                 key={cls.name}
                 cls={cls}
+                badges={badges}
                 x={pos.x}
                 y={pos.y}
                 highlighted={highlightedClasses.has(cls.name)}

@@ -60,7 +60,7 @@ function RuleCard({
       <header>
         <ClassChip name={rule.target} />
         <span className={`chip ${rule.severity === "flag" ? "chip-advisory" : goal ? "chip-goal" : "chip-blocks"}`}>
-          {rule.severity === "flag" ? "⚑ advisory" : goal ? "◎ at the end" : "⛔ blocks"}
+          {rule.severity === "flag" ? "advisory" : goal ? "at the end" : "blocks"}
         </span>
       </header>
       <p className="rule-plain">{rule.plain}</p>

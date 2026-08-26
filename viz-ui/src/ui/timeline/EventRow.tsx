@@ -1,5 +1,5 @@
 import type { Row } from "../../data/replay";
-import type { Fact, Spec } from "../../types";
+import type { Fact, Spec, Violation } from "../../types";
 import { ViolationDetail } from "./ViolationDetail";
 
 interface EventRowProps {
@@ -20,9 +20,34 @@ function entitySummary(facts: Fact[]): string {
   return unique.length > 3 ? `${shown}, +${unique.length - 3} more` : shown;
 }
 
+/** A violation's check, in words — collapsed rows name the reason, not the
+ * whole rendered message (that's in the expanded repair prompt). */
+function reason(violation: Violation): string {
+  const check = violation.check;
+  if (check.includes(":")) return check.slice(check.indexOf(":") + 1).replace(/_/g, " ");
+  const names: Record<string, string> = {
+    existence: "refers to something that doesn't exist",
+    range: "points at the wrong kind of thing",
+    domain: "wrong kind of source",
+    max_per_target: "over the limit",
+    single_value: "changes an already-committed value",
+    one_of: "value not allowed",
+    disjoint: "can't be both kinds",
+    type_coherence: "conflicting kinds",
+    irreflexive: "creates a cycle",
+    asymmetric: "reverse link already exists",
+  };
+  return names[check] ?? check;
+}
+
+function reasons(violations: Violation[]): string {
+  if (!violations.length) return "";
+  const first = reason(violations[0]);
+  return violations.length > 1 ? `${first}, +${violations.length - 1} more` : first;
+}
+
 interface Presentation {
   tone: "good" | "bad" | "warn" | "muted";
-  icon: string;
   title: string;
   detail: string;
 }
@@ -30,51 +55,47 @@ interface Presentation {
 function present(row: Row): Presentation {
   switch (row.kind) {
     case "seeded":
-      return { tone: "muted", icon: "◆", title: "World seeded", detail: entitySummary(row.facts) };
+      return { tone: "muted", title: "World seeded", detail: entitySummary(row.facts) };
     case "restored":
-      return { tone: "muted", icon: "▲", title: "Session restored from a snapshot", detail: entitySummary(row.facts) };
+      return { tone: "muted", title: "Session restored", detail: entitySummary(row.facts) };
     case "committed":
-      if (row.step === null) return { tone: "muted", icon: "·", title: "Nothing new to commit", detail: "the proposal repeated already-known facts" };
+      if (row.step === null)
+        return { tone: "muted", title: "Nothing new to commit", detail: "" };
       return {
         tone: row.verdict.violations.length ? "warn" : "good",
-        icon: "✓",
         title: `Committed — step ${row.step}`,
         detail:
           entitySummary(row.facts) +
-          (row.verdict.violations.length ? ` — ⚑ ${row.verdict.violations.length} advisory` : ""),
+          (row.verdict.violations.length ? ` · ${row.verdict.violations.length} advisory` : ""),
       };
-    case "rejected": {
-      const message = row.verdict.violations[0]?.message ?? "";
-      const snippet = message.length > 90 ? `${message.slice(0, 90)}…` : message;
+    case "rejected":
       return {
         tone: "bad",
-        icon: "✕",
         title: "Rejected",
-        detail: [entitySummary(row.facts), snippet].filter(Boolean).join(" — "),
+        detail: [entitySummary(row.facts), reasons(row.verdict.violations)]
+          .filter(Boolean)
+          .join(" — "),
       };
-    }
     case "withdrawn":
-      return { tone: "muted", icon: "↩", title: "Withdrawn", detail: `${entitySummary(row.facts)} — valid, but rolled back` };
+      return { tone: "muted", title: "Withdrawn", detail: entitySummary(row.facts) };
     case "pending":
-      return { tone: "warn", icon: "…", title: "Proposed, never resolved", detail: entitySummary(row.facts) };
+      return { tone: "warn", title: "Proposed, never resolved", detail: entitySummary(row.facts) };
     case "check":
       return {
         tone: "muted",
-        icon: "?",
-        title: `Preflight check — ${row.verdict.ok ? "would pass" : "would fail"}`,
+        title: `Preflight — ${row.verdict.ok ? "would pass" : "would fail"}`,
         detail: entitySummary(row.facts),
       };
     case "check_goals":
       return row.verdict.ok
-        ? { tone: "good", icon: "◎", title: "Finish-line check — all goals met", detail: "" }
+        ? { tone: "good", title: "Finish-line check — all goals met", detail: "" }
         : {
             tone: "bad",
-            icon: "◎",
             title: `Finish-line check — ${row.verdict.violations.length} goal(s) unmet`,
-            detail: row.verdict.violations.map((v) => v.message).join(" "),
+            detail: reasons(row.verdict.violations),
           };
     case "snapshot":
-      return { tone: "muted", icon: "▽", title: "Snapshot saved", detail: "the committed world was persisted" };
+      return { tone: "muted", title: "Snapshot saved", detail: "" };
   }
 }
 
@@ -92,9 +113,7 @@ export function EventRow({ row, spec, committedFacts, expanded, onToggle }: Even
         aria-expanded={expanded}
         disabled={!expandable}
       >
-        <span className="row-icon" aria-hidden="true">
-          {p.icon}
-        </span>
+        <span className="row-dot" aria-hidden="true" />
         <span className="row-title">{p.title}</span>
         <span className="row-detail">{p.detail}</span>
         {expandable && <span className="row-caret">{expanded ? "▾" : "▸"}</span>}
@@ -103,7 +122,7 @@ export function EventRow({ row, spec, committedFacts, expanded, onToggle }: Even
         <div className="row-body">
           {verdict.repairPrompt && (
             <div className="repair">
-              <h4>What the agent was told</h4>
+              <h4>Repair prompt</h4>
               <pre>{verdict.repairPrompt}</pre>
             </div>
           )}

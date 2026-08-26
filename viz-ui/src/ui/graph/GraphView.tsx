@@ -53,7 +53,7 @@ export function GraphView({
     const pad = (n: number | undefined) => String(n ?? 999).padStart(3, "0");
     const nodes = shown.nodes.map((n) => ({
       id: n.id,
-      width: Math.max(textWidth(n.id, 12.5), textWidth(nodeSubtitle(n), 10)) + 26,
+      width: Math.max(textWidth(n.id, 12.5), textWidth(nodeSubtitle(n), 10)) + 36,
       height: NODE_HEIGHT,
       sort: `${pad(classIndex.get(n.cls))}|${n.id}`,
     }));
@@ -96,10 +96,16 @@ export function GraphView({
           const label =
             edge.field +
             (lit ? (edge.proposed ? " (proposed)" : edge.step > 0 ? ` (step ${edge.step})` : " (seed)") : "");
+          const loop = edge.subject === edge.object;
           return (
             <g key={edge.key} className={cls("edge", lit && "hl", edge.proposed && "proposed", dimming && !lit && "dim")}>
               <path d={d} markerEnd={lit ? "url(#arrow-hl)" : "url(#arrow)"} />
-              <text x={mid.x} y={mid.y - 5} textAnchor="middle" className="edge-label">
+              <text
+                x={loop ? mid.x + 8 : mid.x}
+                y={mid.y - (loop ? -4 : 5)}
+                textAnchor={loop ? "start" : "middle"}
+                className="edge-label"
+              >
                 {label}
               </text>
             </g>
@@ -109,9 +115,8 @@ export function GraphView({
           const pos = layout.positions.get(node.id);
           if (!pos || node.step > visibleStep) return null;
           const lit = highlight.nodes.has(node.id);
-          const width = Math.max(textWidth(node.id, 12.5), textWidth(nodeSubtitle(node), 10)) + 26;
+          const width = Math.max(textWidth(node.id, 12.5), textWidth(nodeSubtitle(node), 10)) + 36;
           const aggregate = aggregates.get(node.id);
-          const color = node.ghost ? "var(--critical)" : `var(${classVar(node.cls)}, var(--muted))`;
           return (
             <g
               key={node.id}
@@ -130,12 +135,19 @@ export function GraphView({
                 else onSelect?.(selected === node.id ? null : node.id);
               }}
             >
-              <rect width={width} height={NODE_HEIGHT} rx="6" style={{ stroke: color }} />
-              <rect width="4" height={NODE_HEIGHT} rx="2" style={{ fill: color }} />
-              <text x={14} y={19} className="node-id">
+              <rect width={width} height={NODE_HEIGHT} rx="6" />
+              {!node.ghost && (
+                <circle
+                  cx={15}
+                  cy={15.5}
+                  r={3.5}
+                  style={{ fill: `var(${classVar(node.cls)}, var(--muted))` }}
+                />
+              )}
+              <text x={node.ghost ? 14 : 25} y={19} className="node-id">
                 {aggregate ? `+ ${aggregate.count} more` : node.id}
               </text>
-              <text x={14} y={35} className="node-cls">
+              <text x={node.ghost ? 14 : 25} y={35} className="node-cls">
                 {aggregate ? node.cls : nodeSubtitle(node)}
               </text>
             </g>
@@ -148,7 +160,8 @@ export function GraphView({
 
 function nodeSubtitle(node: { cls: string; seed: boolean; ghost: boolean; step: number; proposed: boolean }): string {
   if (node.ghost) return "not in this world";
-  const marks = node.proposed ? " · proposed" : node.seed ? " · seed" : node.step > 0 ? ` · step ${node.step}` : "";
+  // Seeds carry no suffix — provenance lives in the click panel.
+  const marks = node.proposed ? " · proposed" : node.step > 0 ? ` · step ${node.step}` : "";
   return node.cls + marks;
 }
 

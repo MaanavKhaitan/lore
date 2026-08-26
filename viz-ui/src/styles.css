@@ -116,6 +116,8 @@ body {
   background: var(--surface-1);
   border: 1px solid var(--border);
   border-radius: 8px;
+  width: fit-content;
+  max-width: 100%;
 }
 svg.graph {
   display: block;
@@ -150,13 +152,6 @@ svg.graph {
   fill: var(--critical);
   font-weight: 600;
 }
-.edge-badges {
-  font-size: 9px;
-  fill: var(--muted);
-  paint-order: stroke;
-  stroke: var(--surface-1);
-  stroke-width: 3;
-}
 .edge.dim,
 .node.dim {
   opacity: 0.3;
@@ -166,15 +161,16 @@ svg.graph {
 }
 .node > rect:first-of-type {
   fill: var(--surface-1);
-  stroke-width: 1.25;
-  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.06));
+  stroke: var(--baseline);
+  stroke-width: 1;
 }
 .node.hl > rect:first-of-type {
-  stroke: var(--critical) !important;
-  stroke-width: 2.25;
+  stroke: var(--critical);
+  stroke-width: 2;
 }
 .node.selected > rect:first-of-type {
-  stroke-width: 2.5;
+  stroke: var(--ink);
+  stroke-width: 1.5;
 }
 .node.proposed > rect:first-of-type,
 .node.ghost > rect:first-of-type {
@@ -208,11 +204,12 @@ svg.graph {
 }
 .class-card > rect:first-of-type {
   fill: var(--surface-1);
-  stroke-width: 1.25;
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.07));
+  stroke: var(--baseline);
+  stroke-width: 1;
 }
 .class-card.hl > rect:first-of-type {
-  stroke-width: 2.5;
+  stroke: var(--ink);
+  stroke-width: 1.75;
 }
 .class-card.dim {
   opacity: 0.3;
@@ -237,9 +234,6 @@ svg.graph {
 }
 .card-id {
   fill: var(--muted);
-}
-.world-edge.meta path {
-  stroke-dasharray: 4 4;
 }
 .world-edge.dim {
   opacity: 0.25;
@@ -291,24 +285,12 @@ svg.graph {
   color: var(--ink-2);
 }
 .chip {
-  font-size: 10.5px;
-  border-radius: 999px;
-  padding: 2px 8px;
+  font-size: 11px;
   white-space: nowrap;
-  border: 1px solid var(--border);
-  color: var(--ink-2);
+  color: var(--muted);
 }
 .chip-blocks {
-  background: color-mix(in srgb, var(--critical) 12%, var(--surface-1));
-  border-color: color-mix(in srgb, var(--critical) 40%, transparent);
-}
-.chip-advisory {
-  background: color-mix(in srgb, var(--warning) 14%, var(--surface-1));
-  border-color: color-mix(in srgb, var(--warning) 45%, transparent);
-}
-.chip-goal {
-  background: color-mix(in srgb, var(--good) 10%, var(--surface-1));
-  border-color: color-mix(in srgb, var(--good) 35%, transparent);
+  color: var(--critical);
 }
 .class-chip {
   display: inline-flex;
@@ -331,20 +313,20 @@ svg.graph {
   margin: 0;
   padding: 0;
   max-width: 980px;
-}
-.event-row {
   background: var(--surface-1);
   border: 1px solid var(--border);
   border-radius: 8px;
-  margin-bottom: 6px;
   overflow: hidden;
+}
+.event-row + .event-row {
+  border-top: 1px solid var(--grid);
 }
 .row-head {
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 9px 12px;
+  padding: 8px 14px;
   background: none;
   border: none;
   font: inherit;
@@ -355,35 +337,35 @@ svg.graph {
 .row-head:disabled {
   cursor: default;
 }
-.row-icon {
+.row-head:not(:disabled):hover {
+  background: var(--page);
+}
+.row-dot {
   flex: none;
-  width: 22px;
-  height: 22px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  display: grid;
-  place-items: center;
-  font-size: 12px;
-  border: 1px solid var(--border);
-  color: var(--ink-2);
+  border: 1px solid var(--baseline);
 }
-.tone-good .row-icon {
-  background: color-mix(in srgb, var(--good) 14%, var(--surface-1));
-  color: var(--good-text);
-  border-color: color-mix(in srgb, var(--good) 40%, transparent);
+.tone-good .row-dot {
+  background: var(--good);
+  border-color: var(--good);
 }
-.tone-bad .row-icon {
-  background: color-mix(in srgb, var(--critical) 12%, var(--surface-1));
-  color: var(--critical);
-  border-color: color-mix(in srgb, var(--critical) 40%, transparent);
+.tone-bad .row-dot {
+  background: var(--critical);
+  border-color: var(--critical);
 }
-.tone-warn .row-icon {
-  background: color-mix(in srgb, var(--warning) 16%, var(--surface-1));
-  border-color: color-mix(in srgb, var(--warning) 50%, transparent);
+.tone-warn .row-dot {
+  background: var(--warning);
+  border-color: var(--warning);
 }
 .row-title {
   font-weight: 600;
-  font-size: 13.5px;
+  font-size: 13px;
   white-space: nowrap;
+}
+.tone-bad .row-title {
+  color: var(--critical);
 }
 .tone-muted .row-title {
   font-weight: 500;
@@ -419,17 +401,12 @@ svg.graph {
 .repair pre {
   margin: 0;
   padding: 10px 12px;
-  background: color-mix(in srgb, var(--critical) 6%, var(--surface-1));
-  border: 1px solid color-mix(in srgb, var(--critical) 25%, transparent);
+  background: var(--page);
+  border: 1px solid var(--grid);
   border-radius: 6px;
   font-size: 12px;
   white-space: pre-wrap;
   color: var(--ink);
-}
-.tone-warn .repair pre,
-.tone-good .repair pre {
-  background: color-mix(in srgb, var(--warning) 8%, var(--surface-1));
-  border-color: color-mix(in srgb, var(--warning) 35%, transparent);
 }
 
 /* --- State ---------------------------------------------------------------------- */

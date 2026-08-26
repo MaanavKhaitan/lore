@@ -64,7 +64,6 @@ export function ViolationDetail({
   if (model.nodes.length === 0) return null;
   return (
     <div className="violation-detail">
-      <h4>{committed ? "What was committed" : "What the proposal would have done"}</h4>
       <GraphView model={model} spec={spec} highlight={highlight} maxHeight={340} />
     </div>
   );
