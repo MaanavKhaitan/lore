@@ -17,11 +17,10 @@ export function App({ spec, trace, snapshot }: AppProps) {
   // full: trace present (World + Timeline + State). snapshot: blob only
   // (World + State, no scrubber). world: schema only.
   const mode = trace ? "full" : snapshot ? "snapshot" : "world";
-  const defaultTab = mode === "full" ? "timeline" : mode === "snapshot" ? "state" : "world";
   // #world / #timeline / #state deep-links a tab (handy for sharing too).
   const fromHash = window.location.hash.slice(1);
   const [tab, setTab] = useState(
-    ["world", "timeline", "state"].includes(fromHash) ? fromHash : defaultTab,
+    ["world", "timeline", "state"].includes(fromHash) ? fromHash : "world",
   );
 
   const colors = useMemo(() => assignClassColors(spec), [spec]);
