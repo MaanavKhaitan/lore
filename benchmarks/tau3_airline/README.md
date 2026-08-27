@@ -1,8 +1,7 @@
 # τ³-bench airline: lore world
 
-Primary eval domain (decided 2026-08-25; see `../tau2_retail/ANALYSIS.md`
-for the domain comparison and the τ³ naming/version note — report as
-"τ³-bench (tau2-bench v1.0.1), airline, text mode").
+Primary eval domain. Report as "τ³-bench (tau2-bench v1.0.1), airline,
+text mode".
 
 `world.py` compiles against lore @ main; `test_world.py` (22 traps +
 legal-action controls) and `harness/test_harness.py` (9 integration tests)
@@ -44,8 +43,8 @@ The airline env enforces almost nothing the policy requires —
 `cancel_reservation` performs zero eligibility checks, and the policy
 itself says *"The API does not check that cancellation rules are met, so
 the agent must make sure the rules apply before calling the API!"*
-Violations reach the DB and directly cost τ³ reward (unlike retail, where
-the tools are hand-hardened). 24 of 50 tasks are deny-tasks.
+Violations reach the DB and directly cost τ³ reward, making policy
+enforcement visible in the benchmark score. 24 of 50 tasks are deny-tasks.
 
 ## Axiom vs rule split (per-check attribution baseline)
 
