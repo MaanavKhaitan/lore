@@ -11,7 +11,7 @@ output boundary what no per-proposal rule can.
 
 Run:  python examples/contracts/demo.py
       python examples/contracts/demo.py --html contracts.html   # + the viz export
-      python examples/contracts/demo.py --json viz-ui/fixtures  # + viewer payloads
+      python examples/contracts/demo.py --json ui/fixtures  # + viewer payloads
 """
 
 import argparse
@@ -37,7 +37,7 @@ from world import (
 
 parser = argparse.ArgumentParser(description="The playbook-enforcement demo.")
 parser.add_argument("--html", metavar="PATH", help="export the run as a self-contained HTML viewer")
-parser.add_argument("--json", metavar="DIR", help="write spec/trace/snapshot JSON payloads (viz-ui fixtures)")
+parser.add_argument("--json", metavar="DIR", help="write spec/trace/snapshot JSON payloads (ui fixtures)")
 args = parser.parse_args()
 
 recorder = TraceRecorder()

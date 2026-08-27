@@ -116,7 +116,7 @@ def test_checked_in_assets_exist_with_markers_and_format_sentinel():
         assert marker in template, f"template.html lost the {marker} marker"
     bundle = assets.joinpath("viz.js").read_text(encoding="utf-8")
     # The bundle states which payload format it reads; a format bump in Python
-    # without `npm run build` in viz-ui/ fails here instead of at view time.
+    # without `npm run build` in ui/ fails here instead of at view time.
     assert f"lore-spec-format:{SPEC_FORMAT}" in bundle
 
 
