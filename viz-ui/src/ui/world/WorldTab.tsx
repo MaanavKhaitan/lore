@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { runLayout } from "../../layout/dagreLayout";
+import { useFitScale } from "../../layout/useFitScale";
 import type { Spec } from "../../types";
 import { relationBadges } from "./badges";
 import { ClassCard, cardSize } from "./ClassCard";
@@ -58,11 +59,22 @@ export function WorldTab({ spec }: { spec: Spec }) {
   const relByPredicate = new Map(spec.relations.map((r) => [r.predicate, r]));
   const dimming = highlightedClasses.size > 0;
 
+  // extra right margin: self-loop arcs and their labels sit past the last card
+  const naturalWidth = layout.width + 130;
+  const naturalHeight = layout.height;
+  const diagramRef = useRef<HTMLDivElement>(null);
+  const scale = useFitScale(diagramRef, naturalWidth, naturalHeight, true);
+
   return (
     <div className="world">
-      <div className="graph-scroll world-diagram">
-        {/* extra right margin: self-loop arcs and their labels sit past the last card */}
-        <svg width={layout.width + 130} height={layout.height} role="img" aria-label="entity classes and relations">
+      <div ref={diagramRef} className="graph-scroll world-diagram fill">
+        <svg
+          width={naturalWidth * scale}
+          height={naturalHeight * scale}
+          viewBox={`0 0 ${naturalWidth} ${naturalHeight}`}
+          role="img"
+          aria-label="entity classes and relations"
+        >
           <defs>
             <marker id="w-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
               <path d="M0,0.5 L7.5,4 L0,7.5" className="arrow-head" />

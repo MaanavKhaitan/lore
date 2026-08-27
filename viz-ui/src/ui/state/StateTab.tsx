@@ -54,6 +54,7 @@ export function StateTab({ spec, facts, maxStep, scrubbable }: StateTabProps) {
           selected={selected}
           onSelect={setSelected}
           collapse
+          fill
           visibleStep={scrubbable ? step : Infinity}
         />
         {selected && <NodePanel id={selected} model={model} spec={spec} onClose={() => setSelected(null)} />}

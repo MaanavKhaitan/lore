@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { GraphModel } from "../../data/graphmodel";
 import { collapseHubs } from "../../layout/collapse";
 import { runLayout, textWidth } from "../../layout/dagreLayout";
+import { useFitScale } from "../../layout/useFitScale";
 import { classVar } from "../../palette";
 import type { Spec } from "../../types";
 import type { Highlight } from "./highlight";
@@ -17,6 +18,9 @@ interface GraphViewProps {
   onSelect?: (id: string | null) => void;
   collapse?: boolean; // fold >8-edge fan-ins (State tab)
   maxHeight?: number;
+  /** Scale a small graph up to fill the container width and viewport height
+   * (main State-tab canvas); mini graphs stay at natural size. */
+  fill?: boolean;
   /** Scrubber support: layout covers the whole model, but facts committed
    * after this step render invisible — nodes never move while scrubbing. */
   visibleStep?: number;
@@ -30,9 +34,11 @@ export function GraphView({
   onSelect,
   collapse = false,
   maxHeight,
+  fill = false,
   visibleStep = Infinity,
 }: GraphViewProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const { shown, aggregates } = useMemo(() => {
     if (!collapse) return { shown: model, aggregates: new Map() };
@@ -68,13 +74,21 @@ export function GraphView({
   }, [shown, classIndex, predicateIndex]);
 
   const dimming = highlight.nodes.size > 0 || highlight.edges.size > 0;
+  const naturalWidth = layout.width + 90;
+  const naturalHeight = layout.height;
+  const scale = useFitScale(scrollRef, naturalWidth, naturalHeight, fill);
 
   return (
-    <div className="graph-scroll" style={maxHeight ? { maxHeight } : undefined}>
+    <div
+      ref={scrollRef}
+      className={cls("graph-scroll", fill && "fill")}
+      style={maxHeight ? { maxHeight } : undefined}
+    >
       <svg
         className="graph"
-        width={layout.width + 90}
-        height={layout.height}
+        width={naturalWidth * scale}
+        height={naturalHeight * scale}
+        viewBox={`0 0 ${naturalWidth} ${naturalHeight}`}
         role="img"
         aria-label="entity graph"
         onClick={() => onSelect?.(null)}
