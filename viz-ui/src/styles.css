@@ -125,6 +125,15 @@ body {
   width: fit-content;
   max-width: 100%;
 }
+/* Main canvases (State tab, World diagram): span the column so small graphs
+ * scale up to fill it; height-capped graphs sit centered. */
+.graph-scroll.fill {
+  width: 100%;
+}
+.graph-scroll.fill > svg {
+  display: block;
+  margin: 0 auto;
+}
 svg.graph {
   display: block;
 }
