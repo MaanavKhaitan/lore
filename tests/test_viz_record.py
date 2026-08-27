@@ -253,7 +253,7 @@ def _fact_key(fact):
 
 
 def replay(events):
-    """Reference fold — the semantics viz-ui's replay.ts implements."""
+    """Reference fold — the semantics ui's replay.ts implements."""
     committed, seen, pending = [], set(), None
     for event in events:
         if event["type"] in ("session_start", "restore"):
