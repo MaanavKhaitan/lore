@@ -3,8 +3,8 @@
 **Setup**: τ³-bench (tau2-bench v1.0.1 @ `a2c0247`), airline domain, text
 mode, all 50 tasks. Agent and user simulator: `claude-sonnet-4-6`,
 temperature 0.0, seed 300, 4 trials per task, max 200 steps — replicating
-the recipe of the published Cascade Dynamics submissions (tau2 PR #489),
-whose stock run is the baseline arm. Arm B: identical setup with lore
+the recipe of the published stock baseline (tau2 PR #489).
+Arm B: identical setup with lore
 guarding the six write tools (`airline_lore` domain): violating tool
 calls are rejected before the database changes and the repair prompt
 returns as the tool error.
@@ -14,7 +14,6 @@ returns as the tool error.
 | Arm | pass^1 | pass^4 | $/conversation |
 |---|---|---|---|
 | Stock Sonnet 4.6 (published) | 82.5 | 76.0 | $0.253 |
-| Cascade-governed Sonnet 4.6 (published) | 87.0 | 82.0 | $0.238 |
 | **Sonnet 4.6 + lore** | **89.0** | **82.0** | ~$0.27 |
 
 ## What the guard demonstrably did
@@ -36,8 +35,8 @@ returns as the tool error.
 
 ## Known limitations
 
-- Single-round runs (no error bars); baseline and cascade numbers are the
-  submitters' published single runs (score-verified from their raw
+- Single-round runs (no error bars); baseline numbers are the
+  submitters' published single run (score-verified from their raw
   trajectories).
 - Documented under-blocks: round-trip turnaround changes (itinerary rule
   compares only unambiguous invariants), conversational insurance
