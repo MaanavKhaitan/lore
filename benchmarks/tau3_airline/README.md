@@ -1,112 +1,107 @@
-# τ³-bench airline: lore world
+# Airline benchmark
 
-Primary eval domain. Report as "τ³-bench (tau2-bench v1.0.1), airline,
-text mode".
+This benchmark tests whether lore helps an agent follow airline policy by
+checking tool calls before they change the database. It uses **τ³-bench
+(tau2-bench v1.0.1), airline, text mode**.
 
-`world.py` compiles against lore @ main; `test_world.py` (22 traps +
-legal-action controls) and `harness/test_harness.py` (9 integration tests)
-all pass offline:
+The airline API leaves many policy checks to the agent, including cancellation
+eligibility. Of the 50 tasks, 24 require denying a request. This makes the
+domain useful for testing whether a guard catches actions the API would allow.
 
-```
+See [RESULTS.md](RESULTS.md) for scores, observed repairs, and limitations.
+
+## Setup and offline tests
+
+Use Python 3.12. The benchmark requires a local tau2-bench v1.0.1 checkout at
+`.context/tau2-bench`; tau2 requires Python below 3.14. Run these commands from
+the repository root after placing the checkout there:
+
+```bash
+python3.12 -m venv .venv
+.venv/bin/pip install -e . -e .context/tau2-bench
 .venv/bin/python benchmarks/tau3_airline/test_world.py
 .venv/bin/python benchmarks/tau3_airline/harness/test_harness.py
 ```
 
-## Harness (`harness/`)
+The 30 world tests and nine harness tests run without an LLM or API key.
+They cover policy violations, allowed actions, and replay behavior.
 
-- `lore_env.py` — `LoreAirlineEnv`, registered as domain **`airline_lore`**:
-  wraps the stock env; write tools are checked against the lore session
-  before executing (reject → repair prompt as an `error=True` tool result,
-  env untouched; pass → execute, then commit). Auth is asserted on a
-  successful `get_user_details`. **Guard scoping:** active only for calls
-  through `get_response` (live orchestrator + trajectory replay), so the
-  evaluator's gold-action path (direct `make_tool_call`) and init actions
-  bypass it; `get_user_details` is reported as mutating so strict replay
-  rebuilds auth state and reproduces guard decisions byte-identically
-  (verified by `test_strict_replay_roundtrip`).
-- `actions.py` — db→seed construction (~9k entities, ~2s/session) and
-  write-tool-call→action-entity mapping (incl. the `FlightUpdate` vs
-  `CabinUpdate` split and multi-entity booking proposals).
-- `shadow.py` — replays saved baseline trajectories, counting violations
-  that reached the env, with per-check attribution
-  (`shadow.py results.json`).
-- `run_lore.py` — registers the domain, then hands over to the stock tau2
-  CLI. Arm B: `run_lore.py run --domain airline_lore ...`; Arm A uses
-  `--domain airline` with identical flags.
+## How the harness works
 
-Requires the Python 3.12 venv (`/opt/homebrew/bin/python3.12 -m venv .venv;
-.venv/bin/pip install -e . -e .context/tau2-bench` — tau2 needs <3.14).
+The `airline_lore` domain wraps the stock airline environment:
 
-## Why airline
+1. Convert a write-tool call into one or more lore entities.
+2. Check the proposal against the session.
+3. If rejected, return a repair prompt as an `error=True` tool result.
+4. If allowed, execute the tool and commit the proposal.
 
-The airline env enforces almost nothing the policy requires —
-`cancel_reservation` performs zero eligibility checks, and the policy
-itself says *"The API does not check that cancellation rules are met, so
-the agent must make sure the rules apply before calling the API!"*
-Violations reach the DB and directly cost τ³ reward, making policy
-enforcement visible in the benchmark score. 24 of 50 tasks are deny-tasks.
+A successful `get_user_details` call records authentication. Each task's seed
+includes the conversation, a fixed clock (`2024-05-15T15:00:00`), customer and
+payment records, reservations, and flight segments with date-specific statuses.
 
-## Axiom vs rule split (per-check attribution baseline)
-
-**Declarative axioms (checked with zero rule code):**
-
-| Policy clause | Axiom |
+| File | Purpose |
 |---|---|
-| ≤1 travel certificate / ≤1 credit card / ≤3 gift cards per reservation | `max_per_target=1/1/3` on typed `PaymentUse` subclasses |
-| ≤5 passengers per reservation | `max_per_target=5` |
-| A reservation is cancelled at most once | `max_per_target=1` |
-| One authenticated customer per conversation | `max_per_target=1` on the `Conversation` singleton |
-| Basic economy flights cannot be modified | range: `FlightUpdate.updates: Relation[ModifiableReservation]`; `BasicEconomyReservation` is disjoint, not a subtype |
-| Updates can never be paid by certificate | range: `payment: Relation[NonCertificateMethod]` |
-| Payment methods must already be in the user profile | existence check on relation ids |
-| Cabin / trip type / membership / insurance / statuses take known values | `one_of` |
-| Payment kinds are mutually exclusive | `lore_disjoint_with` |
+| [world.py](world.py) | Entities, constraints, and policy rules |
+| [harness/lore_env.py](harness/lore_env.py) | Guarded environment and domain registration |
+| [harness/actions.py](harness/actions.py) | Database-to-seed and tool-call-to-entity mapping |
+| [harness/run_lore.py](harness/run_lore.py) | Register the domain and run the stock tau2 CLI |
+| [harness/shadow.py](harness/shadow.py) | Replay baseline trajectories and count violations by check |
 
-**Rules (the `@lore.rule` escape hatch — lore's `field_validator`):**
-authentication + cross-user scope, cancellation eligibility (24h via seeded
-`Clock` / business / insured / airline-cancelled segment), flown-segment
-gates (cancel; cabin change), itinerary immutability (origin/destination/
-trip type), baggage monotonicity + the membership×cabin allowance table,
-passenger-count immutability, payment ownership, no-action-on-cancelled,
-compensation eligibility (reject) and schedule amounts (`severity="flag"` —
-commits but surfaces).
+For live runs, use `harness/run_lore.py run --domain airline_lore` with the
+stock tau2 flags. Use `--domain airline` with identical flags for the baseline.
+The settings used for the recorded run are in [RESULTS.md](RESULTS.md).
 
-**Known under-blocks (documented, deliberate):** the insurance path of
-cancellation eligibility passes whenever `insurance == "yes"` without
-verifying the stated reason is covered (reason is conversational, not
-state); confirmation-before-write and no-fabricated-info are dialogue/
-semantic clauses out of scope for state validation.
+## What lore checks
 
-## Harness mapping notes
+These constraints use declarations rather than custom rule functions:
 
-- `update_reservation_flights` maps to `CabinUpdate` when the flight list
-  is unchanged (legal for every cabin incl. basic economy), else to
-  `FlightUpdate` (whose harness-computed `new_origin`/`new_destination`/
-  `new_trip_type` feed the immutability rule).
-- `book_reservation` proposes the new `Reservation` subclass +
-  `PassengerRecord`s + `PaymentUse`s — booking constraints are entirely
-  axioms on the proposed entities.
-- Seed per task: `Conversation`, `Clock(now="2024-05-15T15:00:00")`, the
-  task's customer, their payment methods, reservations (subclassed by
-  cabin), and `Segment`s with date-specific statuses from `flights[*].dates`.
-- `Authentication` is asserted by the harness when the agent verifies the
-  user id.
+| Policy | Declaration |
+|---|---|
+| At most one certificate, one credit card, and three gift cards per reservation | `max_per_target` on typed payment uses |
+| At most five passengers per reservation | `max_per_target=5` |
+| Cancel a reservation at most once | `max_per_target=1` |
+| One authenticated customer per conversation | `max_per_target=1` |
+| No flight changes for basic economy | `FlightUpdate` must target a `ModifiableReservation` |
+| No certificate payments for updates | Payment must target a `NonCertificateMethod` |
+| Payment methods must exist in the seeded user profiles | Relation existence checks |
+| Cabin, trip type, membership, insurance, and status must use known values | `one_of` |
+| Payment kinds cannot overlap | `lore_disjoint_with` |
 
-## DSL friction log (input to the v2 axiom-promotion decision)
+Python rules check authentication, customer scope, cancellation eligibility,
+already-flown segments, itinerary and passenger-count restrictions, baggage
+allowances, payment ownership, actions on cancelled reservations, and
+compensation eligibility. Compensation amounts use `severity="flag"`: a
+mismatch is reported but does not block the action.
 
-1. **Status gates recur across both domains** (~7 instances): "action valid
-   only if target has attribute value X". Strongest promotion candidate:
-   e.g. `relation(Order, requires_target={"status": "pending"})` — the OWL
-   hasValue-restriction shape.
-2. **Per-field immutability**: itinerary immutability wanted the
-   `single_value` re-assertion pattern, but entities mixing mutable and
-   immutable fields make full re-assertion unusable. Candidate:
-   `field(frozen=True)` mirroring Pydantic.
-3. **Subclasses cannot redeclare an inherited relation with new options**
-   → forced fieldless abstract bases (`AgentAction`, `PaymentUse`) plus
-   `getattr` helpers in shared rules. Livable; an ergonomic gap.
-4. **No `graph.instances(Class)`** — rules cannot enumerate a class;
-   worked around with the `Conversation` singleton anchor + `incoming()`.
-5. **Dialogue-act facts** (cancellation reason, user confirmation) have no
-   home: only the harness can assert them. Boundary of the approach; the
-   under-blocks above follow from it.
+## Mapping and replay details
+
+- `update_reservation_flights` becomes a `CabinUpdate` when the flight list is
+  unchanged, including for basic economy. Otherwise it becomes a `FlightUpdate`,
+  with derived itinerary fields for the immutability rule.
+- `book_reservation` proposes reservation, passenger, and payment-use entities
+  together. Booking also checks authentication.
+- The guard runs on `get_response`, which covers live agent calls and trajectory
+  replay. Initialization and the evaluator's reference actions use direct
+  `make_tool_call` calls and bypass the guard.
+- `get_user_details` is marked as mutating so strict replay rebuilds
+  authentication state. `test_strict_replay_roundtrip` checks that replay
+  reproduces the same guard decisions.
+
+## Known gaps
+
+The guard checks state, so it cannot verify conversational requirements such as
+confirmation before an action or whether a cancellation reason qualifies for
+insurance. The insurance path currently accepts `insurance == "yes"` without
+checking the stated reason. The itinerary rule can also miss round-trip
+turnaround changes. See the [results limitations](RESULTS.md#limitations).
+
+## API lessons
+
+This integration exposed a few recurring needs for future API work:
+
+- A reusable constraint for actions that require a target status.
+- Per-field immutability for entities with both mutable and immutable data.
+- Allowing subclasses to change options on inherited relations.
+- A `graph.instances(Class)` query; current rules use a conversation anchor
+  and `incoming()` instead.
+- A way for the harness to record dialogue facts, such as user confirmation.
