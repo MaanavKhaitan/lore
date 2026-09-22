@@ -2,8 +2,8 @@
 
 Examples::
 
-    python -m lore.viz examples/contracts/world.py -o contracts.html
-    python -m lore.viz examples/contracts/world.py --trace run.json -o run.html
+    python -m lore.viz examples/legal/world.py -o legal.html
+    python -m lore.viz examples/legal/world.py --trace run.json -o run.html
     python -m lore.viz myapp.world:guard --snapshot blob.json -o state.html
 
 The ``world`` argument names a compiled guard: either ``pkg.module:attr`` or

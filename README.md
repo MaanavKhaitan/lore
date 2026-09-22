@@ -230,9 +230,9 @@ out="state.html")` renders the Playback view straight from a persisted
 `session.snapshot()` blob. There's a CLI too:
 
 ```bash
-python -m lore.viz examples/contracts/world.py -o world.html          # schema only
+python -m lore.viz examples/legal/world.py -o world.html          # schema only
 python -m lore.viz myapp.world:guard --snapshot blob.json -o run.html # from redis
-python examples/contracts/demo.py --html contracts.html               # full demo run
+python examples/legal/demo.py --html legal.html               # full demo run
 ```
 
 ## Put the rules in the prompt too
@@ -246,7 +246,7 @@ disjointness, cardinality, and rules — so the same declaration serves
 prevention (the model knows the rules) and detection (violations are caught
 anyway when it ignores them).
 
-`python examples/contracts/demo.py` (no API key) runs the playbook-enforcement
+`python examples/legal/demo.py` (no API key) runs the playbook-enforcement
 example: a drafting agent's negotiation playbook as lore — approved-library
 existence, walk-away vs. escalate severities, immutable defined terms.
 `live_agent.py` next to it drafts a full MSA live, every tool guarded, with
@@ -269,7 +269,7 @@ verdict = session.check_goals()   # zero state change; repair_prompt() on failur
 
 Goals never run during `propose()`; `to_context()` renders them under
 "Goals — checked when you finish", so prevention and detection stay one
-declaration. `examples/contracts/` uses both halves.
+declaration. `examples/legal/` uses both halves.
 
 ## Close the loop with an agent
 

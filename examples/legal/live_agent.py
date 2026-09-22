@@ -16,7 +16,7 @@ commits *with an escalation* the agent must carry into its final report; the
 report itself is re-proposed against the session and checked against the
 playbook's completeness goals (session.check_goals()).
 
-Run:  python examples/contracts/live_agent.py
+Run:  python examples/legal/live_agent.py
 Needs ANTHROPIC_API_KEY (env var, or a repo-root .env). Drafting transcripts
 run long for a demo — a validated run measured ~71k input / ~14k output
 tokens (≈ $0.70 before prompt caching; the loop caches its stable prefix).
