@@ -18,9 +18,10 @@ derived layer including the transitive closure.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import re
+from typing import TYPE_CHECKING, Any
 
-from .graph import Graph, _most_specific
+from .graph import Graph
 from .infer import CheckContext, EdgeKey, _edge_key, derive
 from .schema import Entity, LoreError
 from .store import AttrFact, EdgeFact, Fact, FactStore, LayeredView, Source, TypeFact
@@ -62,8 +63,70 @@ def ground(guard: "Guard", obj: Entity, source: Source) -> list[Fact]:
     return facts
 
 
+def explicit_nones(guard: "Guard", obj: Entity) -> list[tuple[str, str, bool]]:
+    """``(field_name, predicate, is_relation)`` for every field of ``obj`` that
+    was *explicitly* set to ``None`` (per ``model_fields_set``).
+
+    Grounding emits no fact for a ``None`` field, so an explicit ``None`` can
+    never change the graph — but a writer that sets one on a field with a
+    committed value is trying to clear it, and silently keeping the old value
+    would let a guarded side effect diverge from the lore. The session turns
+    these into ``retraction`` violations when a committed value exists.
+    """
+    compiled = guard.classes.get(type(obj).__name__)
+    if compiled is None:
+        return []
+    out = []
+    for field_name, rel in compiled.relations.items():
+        if field_name in obj.model_fields_set and getattr(obj, field_name) is None:
+            out.append((field_name, rel.predicate, True))
+    for field_name, attr in compiled.attributes.items():
+        if field_name in obj.model_fields_set and getattr(obj, field_name) is None:
+            out.append((field_name, attr.attr, False))
+    return out
+
+
 def _an(noun: str) -> str:
     return f"an {noun}" if noun[:1].lower() in "aeiou" else f"a {noun}"
+
+
+_SAFE_ID = re.compile(r"[\w.:/@-]{1,80}\Z")
+
+
+def _safe(value: str) -> str:
+    """Render an untrusted string (an entity id, an agent-written field value)
+    inside a violation message. Violation messages become repair prompts, so a
+    crafted value must not be able to masquerade as instructions: ordinary ids
+    pass through unchanged, anything else (whitespace, control characters,
+    quotes, excessive length) renders quoted with escapes via ``repr``.
+    """
+    if _SAFE_ID.fullmatch(value):
+        return value
+    clipped = value if len(value) <= 80 else value[:80] + "…"
+    return repr(clipped)
+
+
+class _SafeView:
+    """Attribute proxy handed to rule/goal ``message`` templates.
+
+    The template itself is author-trusted; the interpolated field values are
+    not — they come from agent output. String values render through
+    :func:`_safe`; other types format as themselves (containers repr their
+    elements, which already escapes strings).
+    """
+
+    def __init__(self, obj: Entity) -> None:
+        self._obj = obj
+
+    def __getattr__(self, name: str) -> Any:
+        value = getattr(self._obj, name)
+        return _safe(value) if isinstance(value, str) else value
+
+    def __str__(self) -> str:
+        return _safe(str(self._obj))
+
+    def __format__(self, spec: str) -> str:
+        return _safe(format(self._obj, spec))
 
 
 def _mark(fact: Fact, staged: bool) -> str:
@@ -93,9 +156,9 @@ def _chain_nodes(start: str, path: tuple[EdgeFact, ...]) -> list[str]:
 
 def _render_chain(start: str, path: tuple[EdgeFact, ...], staged_keys: set[EdgeKey]) -> str:
     """``a → b (already committed at step 1) → a (proposed)`` for a base path."""
-    parts = [start]
+    parts = [_safe(start)]
     for node, edge in zip(_chain_nodes(start, path)[1:], path):
-        parts.append(f"→ {node} ({_mark(edge, _edge_key(edge) in staged_keys)})")
+        parts.append(f"→ {_safe(node)} ({_mark(edge, _edge_key(edge) in staged_keys)})")
     return " ".join(parts)
 
 
@@ -119,8 +182,8 @@ def check_existence(ctx: CheckContext) -> list[Violation]:
                     check="existence",
                     severity=spec.severity,
                     message=(
-                        f"{fact.subject_id} refers to {fact.object_id} via {fact.predicate}, "
-                        "but no such entity exists."
+                        f"{_safe(fact.subject_id)} refers to {_safe(fact.object_id)} "
+                        f"via {fact.predicate}, but no such entity exists."
                     ),
                     subjects=(fact.subject_id, fact.object_id),
                 )
@@ -147,8 +210,8 @@ def check_range(ctx: CheckContext) -> list[Violation]:
                     check="range",
                     severity=spec.severity,
                     message=(
-                        f"{predicate} must point to {_an(spec.target)}, but {edge.object_id} "
-                        f"is {_an(', '.join(sorted(types)))}."
+                        f"{predicate} must point to {_an(spec.target)}, but "
+                        f"{_safe(edge.object_id)} is {_an(', '.join(sorted(types)))}."
                     ),
                     subjects=(edge.subject_id, edge.object_id),
                 )
@@ -179,7 +242,7 @@ def check_domain(ctx: CheckContext) -> list[Violation]:
                     severity=spec.severity,
                     message=(
                         f"{predicate} can only be asserted by {_an(spec.owner)}, but "
-                        f"{edge.subject_id} is {_an(', '.join(sorted(types)))}."
+                        f"{_safe(edge.subject_id)} is {_an(', '.join(sorted(types)))}."
                     ),
                     subjects=(edge.subject_id,),
                 )
@@ -214,8 +277,8 @@ def check_max_per_target(ctx: CheckContext) -> list[Violation]:
                 e.subject_id for e in edges if _edge_key(e) in ctx.staged_edge_keys
             )
             listing = ", ".join(
-                [f"{e.subject_id} ({_mark(e, False)})" for e in prior]
-                + [f"{s} (proposed)" for s in proposed]
+                [f"{_safe(e.subject_id)} ({_mark(e, False)})" for e in prior]
+                + [f"{_safe(s)} (proposed)" for s in proposed]
             )
             article = _an(spec.target)
             out.append(
@@ -225,7 +288,7 @@ def check_max_per_target(ctx: CheckContext) -> list[Violation]:
                     message=(
                         f"{article[0].upper()}{article[1:]} can have at most "
                         f"{spec.max_per_target} {spec.owner} pointing at it via "
-                        f"'{spec.field}', but {object_id} has {len(edges)}: {listing}."
+                        f"'{spec.field}', but {_safe(object_id)} has {len(edges)}: {listing}."
                     ),
                     subjects=(object_id, *sorted(e.subject_id for e in edges)),
                 )
@@ -271,8 +334,8 @@ def check_single_value(ctx: CheckContext) -> list[Violation]:
                 e.object_id for e in edges if _edge_key(e) in ctx.staged_edge_keys
             )
             listing = ", ".join(
-                [f"{e.object_id} ({_mark(e, False)})" for e in prior]
-                + [f"{o} (proposed)" for o in proposed]
+                [f"{_safe(e.object_id)} ({_mark(e, False)})" for e in prior]
+                + [f"{_safe(o)} (proposed)" for o in proposed]
             )
             article = _an(spec.owner)
             out.append(
@@ -281,7 +344,7 @@ def check_single_value(ctx: CheckContext) -> list[Violation]:
                     severity=spec.severity,
                     message=(
                         f"{article[0].upper()}{article[1:]} can point at only one "
-                        f"{spec.target} via '{spec.field}', but {subject_id} points at "
+                        f"{spec.target} via '{spec.field}', but {_safe(subject_id)} points at "
                         f"{len(edges)}: {listing}."
                     ),
                     subjects=(subject_id, *sorted(e.object_id for e in edges)),
@@ -304,7 +367,7 @@ def check_single_value(ctx: CheckContext) -> list[Violation]:
                     check="single_value",
                     severity=spec.severity,
                     message=(
-                        f"{attr} can hold only one value, but {subject_id} has "
+                        f"{attr} can hold only one value, but {_safe(subject_id)} has "
                         f"{len(facts)}: {listing}."
                     ),
                     subjects=(subject_id,),
@@ -347,8 +410,8 @@ def check_disjoint(ctx: CheckContext) -> list[Violation]:
                         check="disjoint",
                         severity="reject",
                         message=(
-                            f"{node_id} cannot be both {_an(a)} and {_an(b)} — these are "
-                            "disjoint classes."
+                            f"{_safe(node_id)} cannot be both {_an(a)} and {_an(b)} — "
+                            "these are disjoint classes."
                         ),
                         subjects=(node_id,),
                     )
@@ -385,9 +448,9 @@ def check_type_coherence(ctx: CheckContext) -> list[Violation]:
                         check="type_coherence",
                         severity="reject",
                         message=(
-                            f"{node_id} cannot be both {_an(a)} and {_an(b)}: neither "
-                            "is a kind of the other, so no single entity can carry "
-                            "both — use a distinct id."
+                            f"{_safe(node_id)} cannot be both {_an(a)} and {_an(b)}: "
+                            "neither is a kind of the other, so no single entity can "
+                            "carry both — use a distinct id."
                         ),
                         subjects=(node_id,),
                     )
@@ -426,12 +489,12 @@ def check_irreflexive(ctx: CheckContext) -> list[Violation]:
             )
             edge, path = candidates[0]
             if len(path) == 1:
-                message = f"{edge.subject_id} cannot point at itself via '{spec.field}'."
+                message = f"{_safe(edge.subject_id)} cannot point at itself via '{spec.field}'."
                 subjects: tuple[str, ...] = (edge.subject_id,)
             else:
                 chain = _render_chain(edge.subject_id, path, ctx.staged_edge_keys)
                 message = (
-                    f"{edge.subject_id} cannot reach itself via '{spec.field}', but "
+                    f"{_safe(edge.subject_id)} cannot reach itself via '{spec.field}', but "
                     f"this proposal creates a cycle: {chain}."
                 )
                 subjects = tuple(_chain_nodes(edge.subject_id, path)[:-1])
@@ -477,8 +540,8 @@ def check_asymmetric(ctx: CheckContext) -> list[Violation]:
                     check="asymmetric",
                     severity=spec.severity,
                     message=(
-                        f"'{spec.field}' cannot go both ways, but {a} → {b} "
-                        f"({forward_mark}) and {b} → {a} ({reverse_mark}) are "
+                        f"'{spec.field}' cannot go both ways, but {_safe(a)} → {_safe(b)} "
+                        f"({forward_mark}) and {_safe(b)} → {_safe(a)} ({reverse_mark}) are "
                         "both present."
                     ),
                     subjects=(a, b),
@@ -557,12 +620,12 @@ def check_rules(ctx: CheckContext) -> list[Violation]:
                 ):
                     continue  # failing before the proposal too — not newly broken
                 message = (
-                    rule.message.format(obj=obj)
+                    rule.message.format(obj=_SafeView(obj))
                     + " This rule held before this proposal — the proposed facts"
                     " would break it."
                 )
             else:
-                message = rule.message.format(obj=obj)
+                message = rule.message.format(obj=_SafeView(obj))
             out.append(
                 Violation(
                     check=f"rule:{rule.name}",
@@ -607,7 +670,7 @@ def run_goals(guard: "Guard", store: FactStore) -> list[Violation]:
                 Violation(
                     check=f"goal:{goal.name}",
                     severity=goal.severity,
-                    message=goal.message.format(obj=obj),
+                    message=goal.message.format(obj=_SafeView(obj)),
                     subjects=(node_id,),
                 )
             )

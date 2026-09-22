@@ -47,7 +47,7 @@ _load_dotenv()
 try:
     import anthropic
 except ImportError:
-    sys.exit("this demo needs the anthropic SDK: pip install 'lore[anthropic]'")
+    sys.exit("this demo needs the anthropic SDK: pip install 'agent-lore[anthropic]'")
 
 if not os.environ.get("ANTHROPIC_API_KEY"):
     sys.exit("set ANTHROPIC_API_KEY (env var or repo-root .env) to run this demo")

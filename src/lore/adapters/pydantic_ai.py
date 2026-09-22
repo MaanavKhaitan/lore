@@ -24,7 +24,7 @@ def validate_output(session: Session, output: OutputT) -> OutputT:
     except ImportError as exc:  # pragma: no cover - exercised only without the extra
         raise ImportError(
             "the pydantic-ai adapter needs pydantic_ai installed: "
-            "pip install 'lore[pydantic-ai]'"
+            "pip install 'agent-lore[pydantic-ai]'"
         ) from exc
 
     verdict = session.try_commit(*as_entities(output))

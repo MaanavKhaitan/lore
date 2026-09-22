@@ -19,7 +19,7 @@ try:
     )
     from pydantic_ai.models.function import AgentInfo, FunctionModel
 except ImportError:
-    sys.exit("this demo needs pydantic_ai: pip install 'lore[pydantic-ai]'")
+    sys.exit("this demo needs pydantic_ai: pip install 'agent-lore[pydantic-ai]'")
 
 from world import Customer, Order, Refund, SupportRep, guard
 

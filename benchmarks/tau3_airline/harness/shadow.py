@@ -7,7 +7,7 @@ that reached the environment — the baseline arm's headline number, with
 per-check attribution (axiom vs rule).
 
 Usage:
-  .venv/bin/python benchmarks/tau3_airline/harness/shadow.py <results.json> \\
+  uv run --with-editable .context/tau2-bench python -m benchmarks.tau3_airline.harness.shadow <results.json> \\
       [-o violations.json]
 
 Rejected-then-not-committed actions are rolled back and replay continues;
@@ -17,21 +17,17 @@ conservative bias, noted in the report).
 
 import argparse
 import json
-import sys
 from collections import Counter
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from tau2.domains.airline.environment import (  # noqa: E402
+from tau2.domains.airline.environment import (
     get_environment as get_stock_environment,
 )
 
-from actions import (  # noqa: E402
-    ActionMapper, AUTH_TOOL, WRITE_TOOLS, seed_from_db, sync_new_certificates,
+from .actions import (
+    ActionMapper, WRITE_TOOLS, seed_from_db, sync_new_certificates,
 )
-from world import guard as lore_guard  # noqa: E402
+from ..world import guard as lore_guard
 
 
 def iter_tool_events(messages: list) -> "list[tuple[dict, dict]]":

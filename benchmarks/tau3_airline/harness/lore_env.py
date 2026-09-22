@@ -17,40 +17,35 @@ Guard scoping — the part that keeps tau2's evaluator correct:
   re-fires it and authentication state is rebuilt.
 """
 
-import sys
-from pathlib import Path
-
-from loguru import logger
-
-sys.path.insert(0, str(Path(__file__).parent))
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from tau2.domains.airline.environment import (  # noqa: E402
+from tau2.domains.airline.environment import (
     get_environment as get_stock_environment,
 )
-from tau2.domains.airline.environment import (  # noqa: E402
+from tau2.domains.airline.environment import (
     get_tasks as airline_get_tasks,
 )
-from tau2.domains.airline.environment import (  # noqa: E402
+from tau2.domains.airline.environment import (
     get_tasks_split as airline_get_tasks_split,
 )
-from tau2.environment.environment import Environment  # noqa: E402
+from tau2.environment.environment import Environment
 
-from actions import (  # noqa: E402
+from .actions import (
     ActionMapper,
     AUTH_TOOL,
-    PENDING_RESERVATION_ID,
     WRITE_TOOLS,
     seed_from_db,
     sync_new_certificates,
 )
-from world import guard as lore_guard  # noqa: E402
+from ..world import guard as lore_guard
 
 DOMAIN_NAME = "airline_lore"
 
 
 class LoreRejection(Exception):
     """Raised on a guard reject; the message is the repair prompt."""
+
+
+class LoreConsistencyError(RuntimeError):
+    """The environment changed but lore could not record it; abort the run."""
 
 
 class LoreAirlineEnv(Environment):
@@ -78,6 +73,7 @@ class LoreAirlineEnv(Environment):
                                                validate_seed=False)
         self.lore_mapper = ActionMapper(self._db_dump)
         self.lore_log = []
+        self._consistency_error = None
 
     def set_state(self, initialization_data, initialization_actions,
                   message_history, strict: bool = True):
@@ -94,9 +90,16 @@ class LoreAirlineEnv(Environment):
     # -- guard scoping ------------------------------------------------------
 
     def get_response(self, message):
+        if self._consistency_error is not None:
+            raise self._consistency_error
         self._guarding = True
         try:
-            return super().get_response(message)
+            response = super().get_response(message)
+            # tau2 catches ordinary tool exceptions and returns error messages.
+            # A post-effect failure is fatal, not something the agent can retry.
+            if self._consistency_error is not None:
+                raise self._consistency_error
+            return response
         finally:
             self._guarding = False
 
@@ -116,8 +119,10 @@ class LoreAirlineEnv(Environment):
             result = super().make_tool_call(tool_name, requestor=requestor,
                                             **kwargs)
             # successful lookup == user id obtained and verified
-            self.lore_session.try_commit(
+            verdict = self.lore_session.try_commit(
                 self.lore_mapper.auth_entity(kwargs["user_id"]))
+            if not verdict.ok:
+                raise LoreRejection(verdict.repair_prompt())
             return result
 
         if tool_name not in WRITE_TOOLS:
@@ -127,10 +132,9 @@ class LoreAirlineEnv(Environment):
         try:
             entities = self.lore_mapper.map_tool_call(tool_name, kwargs)
         except Exception as e:
-            # malformed args: let the env produce its own error
-            logger.debug(f"lore mapping failed for {tool_name}: {e}")
-            return super().make_tool_call(tool_name, requestor=requestor,
-                                          **kwargs)
+            raise LoreRejection(
+                f"Cannot validate {tool_name}; no action was taken: {e}"
+            ) from e
 
         verdict = self.lore_session.check(*entities)
         self.lore_log.append({
@@ -148,22 +152,27 @@ class LoreAirlineEnv(Environment):
         result = super().make_tool_call(tool_name, requestor=requestor,
                                         **kwargs)
 
-        # env succeeded -> commit the action facts
-        if tool_name == "book_reservation":
-            rid = getattr(result, "reservation_id", None) or result.get(
-                "reservation_id")
-            entities = self.lore_mapper.map_tool_call(
-                tool_name, kwargs, new_reservation_id=rid)
-        if tool_name == "send_certificate":
-            # the env minted a new certificate; it must exist in the lore
-            # world or later payments with it are false existence violations
-            sync_new_certificates(self.lore_session, self._db_dump(),
-                                  kwargs["user_id"])
-        commit = self.lore_session.try_commit(*entities)
-        if not commit.ok:  # cannot happen unless check/commit diverge
-            logger.warning(
-                f"lore commit diverged from check for {tool_name}: "
-                f"{commit.repair_prompt()}")
+        # The external effect has happened. Any failure to mirror it makes
+        # this run unusable; do not continue with a stale policy graph.
+        try:
+            if tool_name == "book_reservation":
+                rid = getattr(result, "reservation_id", None) or result.get(
+                    "reservation_id")
+                if not rid:
+                    raise ValueError("booking returned no reservation_id")
+                entities = self.lore_mapper.map_tool_call(
+                    tool_name, kwargs, new_reservation_id=rid)
+            if tool_name == "send_certificate":
+                sync_new_certificates(self.lore_session, self._db_dump(),
+                                      kwargs["user_id"])
+            commit = self.lore_session.try_commit(*entities)
+            if not commit.ok:
+                raise LoreConsistencyError(commit.repair_prompt())
+        except Exception as e:
+            self._consistency_error = LoreConsistencyError(
+                f"Lore state diverged after {tool_name}; abort this run: {e}"
+            )
+            raise self._consistency_error from e
         return result
 
 

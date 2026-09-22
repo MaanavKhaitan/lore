@@ -1,7 +1,7 @@
 """TraceRecorder — the ``recorder=`` seam, accumulated as the Timeline payload.
 
 Facts are encoded byte-identically to the snapshot codec
-(:func:`lore.session.encode_fact`), so the viewer's single fact decoder serves
+(:func:`lore.snapshot.encode_fact`), so the viewer's single fact decoder serves
 trace events and raw ``snapshot()`` blobs alike. A recorder must never break
 the session it observes: an attribute value the field's annotation cannot
 serialize is degraded to ``{"value": repr(...), "repr": true}`` instead of
@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import TypeAdapter
 
+from ..snapshot import encode_fact
 from ..store import AttrFact, Fact
 from ..verdict import Verdict
 
@@ -77,8 +78,6 @@ class TraceRecorder:
     # --- encoding ---------------------------------------------------------------
 
     def _encode_fact(self, guard: "Guard", fact: Fact) -> dict[str, Any]:
-        from ..session import encode_fact
-
         try:
             return encode_fact(guard, fact, self._adapters)
         except Exception:

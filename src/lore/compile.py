@@ -188,13 +188,18 @@ class Guard:
         return Session(self, seed=seed, validate_seed=validate_seed, recorder=recorder)
 
     def restore(
-        self, blob: str | bytes, *, recorder: "SessionRecorder | None" = None
+        self,
+        blob: str | bytes,
+        *,
+        revalidate: bool = False,
+        recorder: "SessionRecorder | None" = None,
     ) -> "Session":
         """Rehydrate a session from a :meth:`~lore.session.Session.snapshot`
-        blob (see there for the durability contract)."""
+        blob (see there for the durability contract). ``revalidate=True``
+        re-runs every check over the restored world under the current rules."""
         from .session import Session
 
-        return Session.restore(self, blob, recorder=recorder)
+        return Session.restore(self, blob, revalidate=revalidate, recorder=recorder)
 
     def to_context(self) -> str:
         """Render the lore as plain English for a system prompt.
@@ -352,6 +357,16 @@ def _check_severity(value: Any, where: str) -> Severity:
     return value
 
 
+def _check_flag(extra: dict[str, Any], name: str, where: str) -> bool:
+    """Characteristic flags must be exactly ``True``/``False`` — a truthy string
+    like ``"false"`` silently meaning ``True`` is exactly the kind of miscompiled
+    lore that must fail loudly instead."""
+    value = extra.get(name, False)
+    if type(value) is not bool:
+        raise LoreError(f"{where}: {name} must be True or False, got {value!r}")
+    return value
+
+
 def _check_characteristics(spec: RelationSpec) -> None:
     """Reject contradictory characteristic combinations at compile time."""
     p = spec.predicate
@@ -461,11 +476,17 @@ def compile_lore(lore: Lore) -> Guard:
                 target_name = _resolve_target(rel.target, registry, predicate)
                 max_per_target = extra.get("max_per_target")
                 if max_per_target is not None and (
-                    not isinstance(max_per_target, int) or max_per_target < 1
+                    type(max_per_target) is not int or max_per_target < 1
                 ):
                     raise LoreError(
                         f"{predicate}: max_per_target must be an int >= 1, got {max_per_target!r}"
                     )
+                inverse_of = extra.get("inverse_of")
+                if inverse_of is not None and not isinstance(inverse_of, str):
+                    raise LoreError(
+                        f"{predicate}: inverse_of must be a field name string, got {inverse_of!r}"
+                    )
+                asymmetric = _check_flag(extra, "asymmetric", predicate)
                 spec = RelationSpec(
                     predicate,
                     owner,
@@ -474,11 +495,11 @@ def compile_lore(lore: Lore) -> Guard:
                     max_per_target,
                     severity,
                     many=rel.many,
-                    transitive=bool(extra.get("transitive")),
-                    symmetric=bool(extra.get("symmetric")),
-                    asymmetric=bool(extra.get("asymmetric")),
-                    irreflexive=bool(extra.get("irreflexive")) or bool(extra.get("asymmetric")),
-                    inverse_of=extra.get("inverse_of"),
+                    transitive=_check_flag(extra, "transitive", predicate),
+                    symmetric=_check_flag(extra, "symmetric", predicate),
+                    asymmetric=asymmetric,
+                    irreflexive=_check_flag(extra, "irreflexive", predicate) or asymmetric,
+                    inverse_of=inverse_of,
                 )
                 _check_characteristics(spec)
                 _add_unique(relations, predicate, spec, "relation")
@@ -491,6 +512,11 @@ def compile_lore(lore: Lore) -> Guard:
                 allowed = extra.get("one_of")
                 if allowed is not None and len(allowed) == 0:
                     raise LoreError(f"{predicate}: one_of() needs at least one allowed value")
+                if allowed is not None and any(not isinstance(v, str) for v in allowed):
+                    raise LoreError(
+                        f"{predicate}: one_of() values must be strings, got "
+                        f"{tuple(allowed)!r}"
+                    )
                 spec = AttrSpec(
                     predicate, owner, field_name, tuple(allowed) if allowed else None, severity
                 )

@@ -89,13 +89,15 @@ from lore import Graph
 
 @lore.rule(message="Refund {obj.id} exceeds the total of order {obj.refunds}.")
 def refund_within_order_total(refund: Refund, graph: Graph) -> bool:
-    order = graph.get(refund.refunds)
+    order = graph.get(refund.refunds, Order)
     return order is None or refund.amount <= order.total
 ```
 
-Missing relation targets are checked separately. Rules can read entities with
-`graph.get()`, find incoming relations with `graph.incoming()`, and follow
-relation chains with `graph.reachable()`.
+Missing and wrongly typed relation targets are checked separately, so pass the
+expected class to `graph.get()` and handle `None` — the rule then skips inputs
+that the existence and range checks already report. Rules can also find
+incoming relations with `graph.incoming()` and follow relation chains with
+`graph.reachable()`.
 
 Some requirements apply only when the agent finishes. Declare those with
 `@lore.goal` and call `session.check_goals()` at the output boundary. For
@@ -179,8 +181,10 @@ session = guard.restore(blob)
 ```
 
 Snapshots preserve facts, commit order, and seed markings. Restore rejects a
-mismatched schema fingerprint. Commit or roll back any pending proposal before
-snapshotting.
+mismatched schema fingerprint; the fingerprint covers declarations and
+rule/goal metadata, not Python rule bodies. Pass `revalidate=True` to re-run
+every check on restore and fail loudly if the world no longer satisfies the
+current rules. Commit or roll back any pending proposal before snapshotting.
 
 Use `session.dump()` for a text view or `session.graph` to inspect entities and
 relations. To export an HTML viewer with declarations, transaction history,
@@ -199,7 +203,9 @@ with `lore.viz.to_html`. The viewer is a self-contained file; no server is neede
   proposal. Seed the records your rules need; missing records count as missing.
 - Seeds are validated by default. Use `validate_seed=False` to opt out.
 - Facts are append-only. Changing a committed scalar value is a violation.
-  List relations can gain IDs but cannot remove them.
+  List relations can gain IDs but cannot remove them. Explicitly setting a
+  field to `None` cannot clear a committed value and is rejected — model state
+  transitions as new facts (a status value, a superseding entity) instead.
 - Use one session per agent run. Sessions are single-threaded.
 
 ## Examples and results
@@ -220,5 +226,6 @@ pass¹**, compared with **82.5%** for the published baseline. This is a single-r
 comparison; the full difference cannot be attributed to the guard. See
 [results and limitations](benchmarks/tau3_airline/RESULTS.md).
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for adapter guidance and
-[CONTEXT.md](CONTEXT.md) for design notes and research.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for adapter guidance,
+[docs/design.md](docs/design.md) for design notes, and
+[docs/archive](docs/archive/project-context.md) for archived research.

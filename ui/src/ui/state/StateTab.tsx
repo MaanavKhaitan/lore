@@ -21,6 +21,13 @@ export function StateTab({ spec, facts, maxStep, scrubbable }: StateTabProps) {
   const [step, setStep] = useState(maxStep);
   const [selected, setSelected] = useState<string | null>(null);
   const model = useMemo(() => buildGraph(facts, spec), [facts, spec]);
+  // The graph view filters by step itself (so layout stays stable while
+  // scrubbing), but the node panel reads the model directly — give it one
+  // truncated to the scrubbed step or it would reveal future attributes/links.
+  const panelModel = useMemo(
+    () => (scrubbable && step < maxStep ? buildGraph(facts, spec, { maxStep: step }) : model),
+    [facts, spec, model, step, maxStep, scrubbable],
+  );
 
   const families = useMemo(() => {
     const seen = new Map<string, string>(); // family root → var
@@ -57,7 +64,7 @@ export function StateTab({ spec, facts, maxStep, scrubbable }: StateTabProps) {
           fill
           visibleStep={scrubbable ? step : Infinity}
         />
-        {selected && <NodePanel id={selected} model={model} spec={spec} onClose={() => setSelected(null)} />}
+        {selected && <NodePanel id={selected} model={panelModel} spec={spec} onClose={() => setSelected(null)} />}
       </div>
     </div>
   );
