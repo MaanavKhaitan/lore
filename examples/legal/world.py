@@ -19,7 +19,7 @@ uses *new* defined terms must be proposed atomically with them —
 
 from lore import Entity, Graph, Lore, Relation, one_of, relation
 
-lore = Lore("contracts")
+lore = Lore("legal")
 
 
 @lore.entity

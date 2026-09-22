@@ -1,8 +1,8 @@
 {
   "format": 1,
   "kind": "lore-spec",
-  "lore": "contracts",
-  "fingerprint": "sha256:fcec4442c837012ef48d933ae6440647ba6d393b0645fd0bc580abf01465798a",
+  "lore": "legal",
+  "fingerprint": "sha256:12f25f27b439273c76d8b427889e19a1cf200d9ac5aad76f27b19aa6663c2952",
   "classes": [
     {
       "name": "Party",

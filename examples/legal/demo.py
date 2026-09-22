@@ -9,9 +9,9 @@ with the repair prompt that would be fed back. Walk-away terms reject; the
 MFN escalation commits with a flag; session.check_goals() checks at the
 output boundary what no per-proposal rule can.
 
-Run:  python examples/contracts/demo.py
-      python examples/contracts/demo.py --html contracts.html   # + the viz export
-      python examples/contracts/demo.py --json ui/fixtures  # + viewer payloads
+Run:  python examples/legal/demo.py
+      python examples/legal/demo.py --html legal.html   # + the viz export
+      python examples/legal/demo.py --json ui/fixtures  # + viewer payloads
 """
 
 import argparse

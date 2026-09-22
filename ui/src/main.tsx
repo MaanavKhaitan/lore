@@ -30,7 +30,7 @@ async function loadPayloads(): Promise<{ spec: Spec; trace: Trace | null; snapsh
   }
   if (import.meta.env.DEV) {
     // Dev fixtures: regenerate with
-    //   python examples/contracts/demo.py --json ui/fixtures
+    //   python examples/legal/demo.py --json ui/fixtures
     const [spec, trace, snapshot] = await Promise.all([
       import("../fixtures/spec.json"),
       import("../fixtures/trace.json").catch(() => ({ default: null })),

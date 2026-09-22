@@ -96,5 +96,5 @@ Commit the regenerated assets together with the source change — the test
 suite asserts the assets exist and carry the payload-format sentinel
 (`lore-spec-format:<N>` must match `lore.viz.SPEC_FORMAT`), but it cannot
 detect a stale bundle whose format didn't change. Dev loop: regenerate the
-fixtures with `python examples/contracts/demo.py --json ui/fixtures`,
+fixtures with `python examples/legal/demo.py --json ui/fixtures`,
 then `npm run dev` inside `ui/`.
