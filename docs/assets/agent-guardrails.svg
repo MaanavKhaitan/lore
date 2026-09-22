@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="520" viewBox="0 0 1440 520" role="img" aria-labelledby="title description" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif">
+  <title id="title">lore validates agent output with deterministic guardrails</title>
+  <desc id="description">An agent proposes output to lore's deterministic guardrails. If every rule passes, the output is approved and accepted, shown by a green arrow pointing right. If a rule fails, the output is rejected and a repair prompt is sent back to the agent, shown by a red arrow looping above the guardrails and back to the agent.</desc>
+
+  <!-- Use the same green canvas and cream entity boxes as the other README diagrams. -->
+  <rect width="1440" height="520" rx="24" fill="#1C422E"/>
+  <rect x="0.75" y="0.75" width="1438.5" height="518.5" rx="23.25" fill="none" stroke="#50775B" stroke-opacity="0.25" stroke-width="1.5"/>
+
+  <!-- Keep the repair loop above the main flow, with room for both labels. -->
+  <g text-anchor="middle">
+    <text x="525" y="72" font-size="26" font-weight="500" fill="#FF7474">Rejected</text>
+    <text x="525" y="110" font-size="24" fill="#F7FAF6">Repair prompt back to agent</text>
+  </g>
+  <path d="M 830 240 V 172 Q 830 148 806 148 H 244 Q 220 148 220 172 V 240 M 213 228 L 220 240 L 227 228" fill="none" stroke="#FF7474" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Agent proposes an output. -->
+  <rect x="96" y="256" width="248" height="176" rx="16" fill="#ECE9E2" stroke="#D7D3C8" stroke-width="2"/>
+  <text x="220" y="355" text-anchor="middle" font-size="32" font-weight="500" fill="#303637">Agent</text>
+  <text x="502" y="306" text-anchor="middle" font-size="26" fill="#F7FAF6">Proposes output</text>
+  <path d="M 368 344 H 636 M 624 337 L 636 344 L 624 351" fill="none" stroke="#D7D3C8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- lore is the decision point for both outcomes. -->
+  <rect x="660" y="256" width="340" height="176" rx="16" fill="#102D1E" stroke="#86AF95" stroke-width="1.5"/>
+  <g text-anchor="middle" fill="#F7FAF6">
+    <text x="830" y="335" font-size="40" font-weight="500" font-style="italic">lore</text>
+    <text x="830" y="378" font-size="24" fill="#BDDAC4">Deterministic guardrails</text>
+  </g>
+
+  <!-- Approval continues forward; color and text both communicate the verdict. -->
+  <text x="1184" y="306" text-anchor="middle" font-size="26" font-weight="500" fill="#91D5A2">Passes all rules</text>
+  <path d="M 1024 344 H 1344 M 1332 337 L 1344 344 L 1332 351" fill="none" stroke="#91D5A2" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="1184" y="390" text-anchor="middle" font-size="24" fill="#F7FAF6">Output accepted</text>
+</svg>

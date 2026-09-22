@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="600" viewBox="0 0 1440 600" role="img" aria-labelledby="title description">
+  <title id="title">A valid refund schema can still refund the same order twice</title>
+  <desc id="description">A vertical timeline connects two events. At time t1, order_1 was refunded. Later, at time t2, the agent outputs JSON with tool issue_refund, id refund_2, amount 40.0, and refunds order_1. A red box and arrow highlight order_1: a schema cannot check whether this order was already refunded.</desc>
+  <rect width="1440" height="600" rx="24" fill="#1C422E"/>
+  <rect x="0.75" y="0.75" width="1438.5" height="598.5" rx="23.25" fill="none" stroke="#50775B" stroke-opacity="0.25" stroke-width="1.5"/>
+
+  <!-- Time progresses downward from the prior refund to the later agent output. -->
+  <g fill="none" stroke="#86AF95" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 92 124 V 189 M 84 181 L 92 189 L 100 181"/>
+    <path d="M 118 98 H 166 M 118 220 H 184" stroke-opacity="0.6"/>
+    <circle cx="92" cy="98" r="25"/>
+    <circle cx="92" cy="220" r="25"/>
+  </g>
+  <g fill="#F7FAF6" font-family="Menlo, Consolas, 'Liberation Mono', monospace" font-size="26" text-anchor="middle">
+    <text x="92" y="107">t₁</text>
+    <text x="92" y="229">t₂</text>
+  </g>
+
+  <!-- The prior state is deliberately outside the agent's JSON output. -->
+  <text x="230" y="65" fill="#BDDAC4" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="18" font-weight="500">Earlier</text>
+  <g fill="#F7FAF6">
+    <g fill="none" stroke="#F7FAF6" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="201" cy="98" r="12"/>
+      <path d="M 201 91 V 98 L 206 101"/>
+    </g>
+    <text x="230" y="109" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="28"><tspan font-family="'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace">order_1</tspan><tspan dx="12">was refunded.</tspan></text>
+  </g>
+
+  <rect x="184" y="188" width="1192" height="352" rx="16" fill="#102D1E" stroke="#50775B" stroke-opacity="0.5" stroke-width="1.5"/>
+  <text x="230" y="227" fill="#BDDAC4" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="18" font-weight="500">Now · Agent output</text>
+
+  <!-- Explicit indentation preserves the code layout across SVG renderers. -->
+  <g fill="#F7FAF6" font-family="Menlo, Consolas, 'Liberation Mono', monospace" font-size="29">
+    <text x="230" y="277">{</text>
+    <text x="300" y="321">"tool": "issue_refund",</text>
+    <text x="300" y="365">"id": "refund_2",</text>
+    <text x="300" y="409">"amount": 40.0,</text>
+    <text x="300" y="453">"refunds": "order_1"</text>
+    <text x="230" y="497">}</text>
+  </g>
+
+  <!-- The annotation points only at the referenced order, not the entire field. -->
+  <rect x="479" y="424" width="184" height="43" rx="7" fill="#FF7474" fill-opacity="0.07" stroke="#FF7474" stroke-width="2.5"/>
+  <path d="M 910 446 H 679 M 691 437 L 678 446 L 691 455" fill="none" stroke="#FF7474" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="944" y="416" fill="#F7FAF6" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="28">
+    <tspan x="944" dy="0">A schema can’t check</tspan>
+    <tspan x="944" dy="38">whether this order was</tspan>
+    <tspan x="944" dy="38">already refunded.</tspan>
+  </text>
+</svg>

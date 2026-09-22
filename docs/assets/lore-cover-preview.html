@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>lore — motion cover</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100svh; display: grid; place-items: center; background: #06100b; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
+    main { width: min(1440px, 100%); padding: clamp(12px, 3vw, 48px); }
+    video { display: block; width: 100%; aspect-ratio: 1920 / 1026; background: #092419; }
+    footer { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; align-items: center; margin-top: 20px; font-size: 13px; color: #aab9b0; }
+    nav { display: flex; gap: 22px; }
+    a { color: #fff; text-underline-offset: 4px; }
+  </style>
+</head>
+<body>
+  <main>
+    <video controls autoplay loop muted playsinline preload="auto" poster="lore-cover-animated-v2.png" aria-label="lore: original forest with stronger leaf sway, flowing stream highlights, and distant birds; stationary white text">
+      <source src="lore-cover-validate.mp4" type="video/mp4">
+      Your browser does not support video playback. <a href="lore-cover-validate.mp4">Download the cover video</a>.
+    </video>
+    <footer>
+      <span>lore · 12-second loop · 1920 × 1026</span>
+      <nav aria-label="Download cover assets">
+        <a href="lore-cover-validate.mp4" download>Download video</a>
+        <a href="lore-cover-animated-v2.png" download>Download still</a>
+      </nav>
+    </footer>
+  </main>
+</body>
+</html>

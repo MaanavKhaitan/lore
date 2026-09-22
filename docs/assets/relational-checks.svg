@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="620" viewBox="0 0 1440 620" role="img" aria-labelledby="title description" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif">
+  <title id="title">Three common relation rules: existence, cardinality, and no cycles</title>
+  <desc id="description">Three panels illustrate rejected relations in red. Existence: a refund points to a missing order. Cardinality: a second refund points to an order that already has one refund. No cycles: Alice reports to Bob and Bob reports to Carol, so Carol cannot report to Alice. Sage arrows show existing relations; red arrows with an X show rejected relations.</desc>
+  <defs>
+    <marker id="arrow-sage" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M 2 2 L 10 6 L 2 10" fill="none" stroke="#86AF95" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <marker id="arrow-red" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M 2 2 L 10 6 L 2 10" fill="none" stroke="#FF7474" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <g id="rejected" stroke="#FF7474" stroke-width="2.5" stroke-linecap="round">
+      <circle r="14" fill="#102D1E" stroke="none"/>
+      <path d="M -6 -6 L 6 6 M 6 -6 L -6 6"/>
+    </g>
+  </defs>
+
+  <!-- Use the shared Pine palette; use warm off-white fills only for entity boxes. -->
+  <rect width="1440" height="620" rx="24" fill="#1C422E"/>
+  <rect x="0.75" y="0.75" width="1438.5" height="618.5" rx="23.25" fill="none" stroke="#50775B" stroke-opacity="0.25" stroke-width="1.5"/>
+  <g fill="#102D1E" stroke="#50775B" stroke-opacity="0.5" stroke-width="1.5">
+    <rect x="48" y="40" width="432" height="514" rx="16"/>
+    <rect x="504" y="40" width="432" height="514" rx="16"/>
+    <rect x="960" y="40" width="432" height="514" rx="16"/>
+  </g>
+
+  <!-- Existence: a reference cannot resolve to a missing node. -->
+  <g text-anchor="middle">
+    <text x="264" y="102" font-size="24" font-weight="500" fill="#F7FAF6">Existence</text>
+
+    <rect x="184" y="176" width="160" height="60" rx="12" fill="#ECE9E2" stroke="#D7D3C8" stroke-width="2"/>
+    <text x="264" y="212" font-size="18" fill="#303637">Refund</text>
+    <path d="M 264 246 V 330" fill="none" stroke="#FF7474" stroke-width="2.5" marker-end="url(#arrow-red)"/>
+    <use href="#rejected" x="264" y="288"/>
+    <rect x="184" y="340" width="160" height="60" rx="12" fill="#ECE9E2" stroke="#FF7474" stroke-width="2" stroke-dasharray="7 7"/>
+    <text x="264" y="376" font-size="18" fill="#303637">Order</text>
+    <text x="264" y="435" font-size="19" fill="#FF7474">Order not found</text>
+
+    <path d="M 80 460 H 448" stroke="#50775B" stroke-opacity="0.5"/>
+    <text x="264" y="494" font-size="21" fill="#F7FAF6">
+      <tspan x="264">A refund must reference</tspan>
+      <tspan x="264" dy="30">an existing order.</tspan>
+    </text>
+  </g>
+
+  <!-- Cardinality: the second incoming refund exceeds the limit. -->
+  <g text-anchor="middle">
+    <text x="720" y="102" font-size="24" font-weight="500" fill="#F7FAF6">Cardinality</text>
+
+    <rect x="640" y="176" width="160" height="60" rx="12" fill="#ECE9E2" stroke="#D7D3C8" stroke-width="2"/>
+    <text x="720" y="212" font-size="18" fill="#303637">Order</text>
+    <path d="M 611 330 L 682 246" fill="none" stroke="#86AF95" stroke-width="2.5" marker-end="url(#arrow-sage)"/>
+    <path d="M 829 330 L 758 246" fill="none" stroke="#FF7474" stroke-width="2.5" marker-end="url(#arrow-red)"/>
+    <use href="#rejected" x="793.5" y="288"/>
+    <rect x="540" y="340" width="152" height="60" rx="12" fill="#ECE9E2" stroke="#D7D3C8" stroke-width="2"/>
+    <text x="616" y="376" font-size="18" fill="#303637">Refund 1</text>
+    <rect x="748" y="340" width="152" height="60" rx="12" fill="#ECE9E2" stroke="#FF7474" stroke-width="2"/>
+    <text x="824" y="376" font-size="18" fill="#303637">Refund 2</text>
+    <text x="720" y="435" font-size="19" fill="#FF7474">Second refund rejected</text>
+
+    <path d="M 536 460 H 904" stroke="#50775B" stroke-opacity="0.5"/>
+    <text x="720" y="494" font-size="21" fill="#F7FAF6">
+      <tspan x="720">An order can have</tspan>
+      <tspan x="720" dy="30">at most one refund.</tspan>
+    </text>
+  </g>
+
+  <!-- No cycles: the proposed Carol-to-Alice edge closes the reporting chain. -->
+  <g text-anchor="middle">
+    <text x="1176" y="102" font-size="24" font-weight="500" fill="#F7FAF6">No cycles</text>
+
+    <rect x="1112" y="176" width="128" height="60" rx="12" fill="#ECE9E2" stroke="#D7D3C8" stroke-width="2"/>
+    <text x="1176" y="212" font-size="18" fill="#303637">Alice</text>
+    <path d="M 1214 246 L 1285 330" fill="none" stroke="#86AF95" stroke-width="2.5" marker-end="url(#arrow-sage)"/>
+    <path d="M 1230 370 H 1122" fill="none" stroke="#86AF95" stroke-width="2.5" marker-end="url(#arrow-sage)"/>
+    <path d="M 1067 330 L 1138 246" fill="none" stroke="#FF7474" stroke-width="2.5" marker-end="url(#arrow-red)"/>
+    <use href="#rejected" x="1102.5" y="288"/>
+    <text x="1176" y="304" font-size="18" fill="#BDDAC4">reports to</text>
+    <rect x="984" y="340" width="128" height="60" rx="12" fill="#ECE9E2" stroke="#D7D3C8" stroke-width="2"/>
+    <text x="1048" y="376" font-size="18" fill="#303637">Carol</text>
+    <rect x="1240" y="340" width="128" height="60" rx="12" fill="#ECE9E2" stroke="#D7D3C8" stroke-width="2"/>
+    <text x="1304" y="376" font-size="18" fill="#303637">Bob</text>
+    <text x="1176" y="435" font-size="19" fill="#FF7474">Cycle rejected</text>
+
+    <path d="M 992 460 H 1360" stroke="#50775B" stroke-opacity="0.5"/>
+    <text x="1176" y="494" font-size="21" fill="#F7FAF6">
+      <tspan x="1176">A reporting chain</tspan>
+      <tspan x="1176" dy="30">cannot have cycles.</tspan>
+    </text>
+  </g>
+
+  <!-- A shared legend keeps the distinction readable beyond color alone. -->
+  <g font-size="18" fill="#BDDAC4">
+    <path d="M 477 588 H 521" fill="none" stroke="#86AF95" stroke-width="2.5" marker-end="url(#arrow-sage)"/>
+    <text x="535" y="594">Existing relation</text>
+    <path d="M 755 588 H 799" fill="none" stroke="#FF7474" stroke-width="2.5" marker-end="url(#arrow-red)"/>
+    <circle cx="777" cy="588" r="14" fill="#1C422E"/>
+    <path d="M 771 582 L 783 594 M 783 582 L 771 594" fill="none" stroke="#FF7474" stroke-width="2.5" stroke-linecap="round"/>
+    <text x="813" y="594">Rejected relation</text>
+  </g>
+</svg>
