@@ -368,3 +368,44 @@ def test_many_edged_session_round_trips_identically():
     assert [f.step for f in restored.facts] == [f.step for f in session.facts]
     assert restored.dump() == session.dump()
     assert restored.graph.get("d1").tags == session.graph.get("d1").tags == ["t2", "t1", "t3"]
+
+
+# --- revalidate=True: the safety net for edited rule bodies --------------------
+# Rule bodies are not fingerprinted, so a snapshot taken under one
+# implementation restores silently under another. revalidate=True re-runs
+# every check over the restored world under the *current* rules.
+
+
+def _cap_lore(max_amount: float) -> Lore:
+    lore2 = Lore("reval-test")
+
+    @lore2.entity
+    class Payment(Entity):
+        amount: float
+
+    @lore2.rule(message="Payment {obj.id} of {obj.amount} exceeds the cap.")
+    def within_cap(payment: Payment, graph) -> bool:
+        return payment.amount <= max_amount
+
+    return lore2
+
+
+def test_restore_revalidates_under_current_rules():
+    loose = _cap_lore(100.0).compile()
+    session = loose.session()
+    session.try_commit(loose.classes["Payment"].cls(id="p1", amount=50.0))
+    blob = session.snapshot()
+
+    strict = _cap_lore(10.0).compile()
+    assert strict.fingerprint == loose.fingerprint  # bodies aren't hashed
+    strict.restore(blob)  # default: trusted as-is
+    with pytest.raises(LoreError, match="invalid under the current rules"):
+        strict.restore(blob, revalidate=True)
+
+
+def test_restore_revalidate_passes_on_a_consistent_world():
+    guard2 = _cap_lore(100.0).compile()
+    session = guard2.session()
+    session.try_commit(guard2.classes["Payment"].cls(id="p1", amount=50.0))
+    restored = guard2.restore(session.snapshot(), revalidate=True)
+    assert restored.facts == session.facts

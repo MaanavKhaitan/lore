@@ -22,6 +22,7 @@ from typing import (
     ForwardRef,
     Literal,
     Sequence,
+    TypeVar,
     get_args,
     get_origin,
 )
@@ -33,6 +34,7 @@ if TYPE_CHECKING:
     from .compile import Guard
 
 Severity = Literal["reject", "flag"]
+EntityT = TypeVar("EntityT", bound="Entity")
 
 
 class LoreError(Exception):
@@ -241,7 +243,7 @@ class Lore:
         self._rules: list[_RawRule] = []
         self._goals: list[_RawGoal] = []
 
-    def entity(self, cls: type[Entity]) -> type[Entity]:
+    def entity(self, cls: type[EntityT]) -> type[EntityT]:
         """Class decorator registering an ``Entity`` subclass with this lore.
 
         Disjointness is declared on the class as

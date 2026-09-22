@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from lore import Entity, Lore, LoreViolation, Relation, relation
 from lore.adapters.anthropic import guard_tool, violation_result
 from lore.store import TypeFact
@@ -76,6 +78,24 @@ def test_guard_tool_accepts_plain_payloads_and_entity_sequences():
     assert create_orders() == ("created", False)
     assert TypeFact("ord_3", "Order", "asserted") in session.facts
     assert TypeFact("ord_4", "Order", "asserted") in session.facts
+
+
+@pytest.mark.parametrize("callable_payload", [False, True])
+def test_serialization_failure_discards_proposal(callable_payload):
+    session = make_session()
+    before = session.facts
+    payload = {"not_json": {1, 2}}
+
+    @guard_tool(session)
+    def create_order():
+        return Order(id="ord_3"), (lambda: payload) if callable_payload else payload
+
+    with pytest.raises(TypeError):
+        create_order()
+    assert session.facts == before
+    assert session.staged_facts == ()
+    # A failed call does not poison the next one.
+    assert session.try_commit(Order(id="ord_3")).ok
 
 
 def test_violation_result_shape():

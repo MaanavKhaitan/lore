@@ -6,11 +6,7 @@ Run: .venv/bin/python -m pytest benchmarks/tau3_airline/test_world.py -q
 """
 
 import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent))
-
-from world import (  # noqa: E402
+from .world import (
     Authentication,
     BaggageUpdate,
     BasicEconomyReservation,
@@ -81,6 +77,24 @@ def test_basic_economy_flight_change_is_range_violation():
     v = s.check(flight_update())
     assert not v.ok
     assert "ModifiableReservation" in v.repair_prompt()
+
+
+def test_wrong_relation_targets_return_verdicts_instead_of_crashing_rules():
+    s = session()
+    proposals = [
+        Cancellation(id="bad_cancel", cancels="cust"),
+        flight_update(res="cc"),
+        flight_update(payment="seg1"),
+        BaggageUpdate(id="bad_bags", updates="cc", payment="cc",
+                      total_baggages=3, nonfree_baggages=1),
+        PassengerUpdate(id="bad_passengers", updates="cc", count=2),
+        GiftCardUse(id="bad_use", pays_for="cc", method="cust"),
+        CertificateGrant(id="bad_grant", to_customer="res", amount=100),
+    ]
+    for proposal in proposals:
+        verdict = s.check(proposal)
+        assert not verdict.ok
+        assert any(v.check == "range" for v in verdict.rejects)
 
 
 def test_basic_economy_cabin_only_change_is_legal():
@@ -253,7 +267,7 @@ def test_compensation_correct_amount_clean():
 
 
 def _upgrade(s, cabin="economy"):
-    from world import UpgradeFlightUpdate
+    from .world import UpgradeFlightUpdate
     return s.try_commit(UpgradeFlightUpdate(
         id="up1", updates="res", payment="cc", cabin=cabin,
         new_origin="JFK", new_destination="SFO", new_trip_type="one_way",
@@ -289,7 +303,7 @@ def test_pure_basic_econ_flight_change_still_range_violation():
 
 
 def test_booking_requires_auth():  # review #2
-    from world import Booking
+    from .world import Booking
     s = guard.session(seed=seeds())  # no Authentication
     v = s.check(Booking(id="b1", to_customer="cust"))
     assert not v.ok and "authenticated" in v.repair_prompt()

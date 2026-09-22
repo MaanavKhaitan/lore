@@ -2,20 +2,20 @@
 gold-path bypass, and the strict-replay round trip the evaluator depends on.
 No LLM, no API key.
 
-Run: .venv/bin/python benchmarks/tau3_airline/harness/test_harness.py
+Run: uv run --with-editable .context/tau2-bench pytest benchmarks/tau3_airline/harness
 """
 
 import sys
-from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).parent))
-sys.path.insert(0, str(Path(__file__).parent.parent))
+import pytest
 
-from tau2.data_model.message import AssistantMessage, ToolCall  # noqa: E402
+from tau2.data_model.message import AssistantMessage, ToolCall
 
-import lore_env  # noqa: E402
-from lore_env import get_environment  # noqa: E402
-from shadow import shadow_one  # noqa: E402
+from . import lore_env
+from .lore_env import get_environment
+from .shadow import shadow_one
 
 # real db records (verified by data probe):
 INELIGIBLE = ("VAAOXJ", "lei_rossi_3206")   # economy, no insurance, old, ok
@@ -141,6 +141,70 @@ def test_registration():
     assert "airline_lore" in reg.get_info().domains
     tasks = reg.get_tasks_loader("airline_lore")()
     assert len(tasks) == 50
+
+
+def test_mapping_failure_never_executes_write():
+    c = Convo(get_environment())
+    rid, uid = BUSINESS
+    assert not c.call("get_user_details", user_id=uid).error
+    before_db = c.env.get_db_hash()
+    before_facts = c.env.lore_session.facts
+    with patch.object(c.env.lore_mapper, "map_tool_call", side_effect=ValueError("bad mapping")):
+        tm = c.call("cancel_reservation", reservation_id=rid)
+    assert tm.error and "no action was taken" in tm.content
+    assert c.env.get_db_hash() == before_db
+    assert c.env.lore_session.facts == before_facts
+
+
+def test_conflicting_authentication_returns_guard_rejection():
+    c = Convo(get_environment())
+    _, uid = BUSINESS
+    _, other_uid = INELIGIBLE
+    assert not c.call("get_user_details", user_id=uid).error
+    before = c.env.lore_session.facts
+    tm = c.call("get_user_details", user_id=other_uid)
+    assert tm.error
+    assert c.env.lore_session.facts == before
+
+
+def test_commit_divergence_aborts_and_blocks_further_calls():
+    c = Convo(get_environment())
+    rid, uid = BUSINESS
+    assert not c.call("get_user_details", user_id=uid).error
+    rejected = SimpleNamespace(ok=False, repair_prompt=lambda: "forced divergence")
+    with patch.object(c.env.lore_session, "try_commit", return_value=rejected):
+        with pytest.raises(lore_env.LoreConsistencyError, match="forced divergence"):
+            c.call("cancel_reservation", reservation_id=rid)
+    # The external write cannot be undone, so the run must not continue.
+    assert c.env.tools.db.reservations[rid].status == "cancelled"
+    assert not c.env._guarding
+    with pytest.raises(lore_env.LoreConsistencyError):
+        c.call("get_reservation_details", reservation_id=rid)
+    # A fresh task rebuilds the lore world and clears the fatal state.
+    c.env.set_state(None, None, [])
+    assert not c.call("get_reservation_details", reservation_id=rid).error
+
+
+def test_post_effect_exception_aborts_run():
+    c = Convo(get_environment())
+    rid, uid = BUSINESS
+    assert not c.call("get_user_details", user_id=uid).error
+    with patch.object(c.env.lore_session, "try_commit", side_effect=ValueError("cannot commit")):
+        with pytest.raises(lore_env.LoreConsistencyError, match="cannot commit"):
+            c.call("cancel_reservation", reservation_id=rid)
+    assert c.env.tools.db.reservations[rid].status == "cancelled"
+
+
+def test_rejected_certificate_sync_is_not_silently_ignored():
+    session = SimpleNamespace(
+        graph=SimpleNamespace(get=lambda _: None),
+        try_commit=lambda _: SimpleNamespace(ok=False, repair_prompt=lambda: "invalid certificate"),
+    )
+    db = {"users": {"user": {"payment_methods": {
+        "cert": {"id": "cert", "source": "certificate", "amount": 100},
+    }}}}
+    with pytest.raises(RuntimeError, match="Cannot sync certificate cert"):
+        lore_env.sync_new_certificates(session, db, "user")
 
 
 if __name__ == "__main__":

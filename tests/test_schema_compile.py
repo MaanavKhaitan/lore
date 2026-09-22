@@ -64,7 +64,7 @@ def test_unknown_forward_reference_raises():
 
     @lore.entity
     class Order(Entity):
-        region: Relation["Nowhere"]
+        region: Relation["Nowhere"]  # noqa: F821 — deliberately unregistered target
 
     with pytest.raises(LoreError, match="'Nowhere' is not a registered entity"):
         lore.compile()
@@ -529,3 +529,57 @@ def test_inherited_field_keeps_defining_class_predicate():
     # A VIPRefund edge counts against the same "Refund.refunds" cardinality pool.
     assert guard.classes["VIPRefund"].relations["refunds"].predicate == "Refund.refunds"
     assert set(guard.relations) == {"Refund.refunds"}
+
+
+def test_option_types_must_be_exact():
+    # bool is an int subclass; max_per_target=True must not mean 1.
+    lore = Lore("t")
+
+    @lore.entity
+    class Order(Entity):
+        pass
+
+    @lore.entity
+    class Refund(Entity):
+        refunds: Relation[Order] = relation(max_per_target=True)
+
+    with pytest.raises(LoreError, match="max_per_target must be an int >= 1, got True"):
+        lore.compile()
+
+
+def test_characteristic_flags_must_be_bool():
+    # A truthy string like "false" must not silently mean True.
+    lore = Lore("t")
+
+    @lore.entity
+    class Node(Entity):
+        next: Relation["Node"] | None = relation(transitive="false", default=None)
+
+    with pytest.raises(LoreError, match="transitive must be True or False, got 'false'"):
+        lore.compile()
+
+
+def test_inverse_of_must_be_a_string():
+    lore = Lore("t")
+
+    @lore.entity
+    class Customer(Entity):
+        pass
+
+    @lore.entity
+    class Order(Entity):
+        placed_by: Relation[Customer] = relation(inverse_of=True)
+
+    with pytest.raises(LoreError, match="inverse_of must be a field name string"):
+        lore.compile()
+
+
+def test_one_of_values_must_be_strings():
+    lore = Lore("t")
+
+    @lore.entity
+    class Order(Entity):
+        status: str = one_of("paid", 1)
+
+    with pytest.raises(LoreError, match="one_of\\(\\) values must be strings"):
+        lore.compile()

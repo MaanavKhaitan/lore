@@ -10,12 +10,7 @@ Two jobs:
 Kept import-light: no tau2 imports, so the shadow replayer can reuse it.
 """
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from world import (  # noqa: E402
+from ..world import (
     Authentication,
     Booking,
     UpgradeFlightUpdate,
@@ -39,7 +34,6 @@ from world import (  # noqa: E402
     ModifiableReservation,
     PassengerRecord,
     PassengerUpdate,
-    Reservation,
     Segment,
 )
 
@@ -181,7 +175,11 @@ def sync_new_certificates(session, db_dump: dict, user_id: str) -> None:
         return
     for pm in user["payment_methods"].values():
         if pm["source"] == "certificate" and session.graph.get(pm["id"]) is None:
-            session.try_commit(_payment_method_entity(pm, user_id))
+            verdict = session.try_commit(_payment_method_entity(pm, user_id))
+            if not verdict.ok:
+                raise RuntimeError(
+                    f"Cannot sync certificate {pm['id']}: {verdict.repair_prompt()}"
+                )
 
 
 class ActionMapper:

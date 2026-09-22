@@ -128,8 +128,8 @@ def entry_balances(entry: JournalEntry, graph: Graph) -> bool:
 
 @lore.rule(message="Journal entry {obj.id} posts to period {obj.period}, which is closed.")
 def no_posting_to_closed_period(entry: JournalEntry, graph: Graph) -> bool:
-    period = graph.get(entry.period)
-    return period is None or period.status == "open"  # None → existence reports it
+    period = graph.get(entry.period, Period)
+    return period is None or period.status == "open"  # existence/range reports None
 
 
 @lore.rule(message="Posting {obj.id} has a non-positive amount; direction belongs in 'side'.")
@@ -144,7 +144,7 @@ def posting_amount_positive(posting: Posting, graph: Graph) -> bool:
     )
 )
 def payment_settles_in_full(payment: Payment, graph: Graph) -> bool:
-    invoice = graph.get(payment.reconciles)
+    invoice = graph.get(payment.reconciles, Invoice)
     return invoice is None or payment.amount_cents == invoice.total_cents
 
 

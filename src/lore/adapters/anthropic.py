@@ -41,7 +41,9 @@ def guard_tool(session: Session) -> Callable[[Callable[..., Any]], Callable[...,
     ``(repair_prompt, is_error=True)`` and leaves zero trace — side effects
     belong in a callable payload, which runs inside the guarded block (after
     validation, before commit). The payload (or its return value) is passed
-    through if it is a string and JSON-encoded otherwise.
+    through if it is a string and JSON-encoded otherwise, before committing
+    the facts. Payload/encoding errors discard the proposal; external side
+    effects already performed by the payload cannot be rolled back by lore.
     """
 
     def decorate(fn: Callable[..., Any]) -> Callable[..., ToolResult]:
@@ -51,9 +53,10 @@ def guard_tool(session: Session) -> Callable[[Callable[..., Any]], Callable[...,
             try:
                 with session.guarded(*as_entities(entities)):
                     content = payload() if callable(payload) else payload
+                    content = content if isinstance(content, str) else json.dumps(content)
             except LoreViolation as err:
                 return err.repair_prompt, True
-            return content if isinstance(content, str) else json.dumps(content), False
+            return content, False
 
         return wrapper
 

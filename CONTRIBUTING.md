@@ -3,6 +3,22 @@
 The most useful contribution right now is an adapter for a framework we don't
 cover yet. This page is the whole guide.
 
+## Local setup
+
+`uv.lock` pins the Python development environment; the published library
+retains the dependency ranges in `pyproject.toml`.
+
+```bash
+uv sync --locked
+uv run --locked pytest -q
+uv build
+```
+
+Commit `uv.lock` when intentionally updating dependencies (`uv lock --upgrade`
+updates all pins; `uv lock --upgrade-package PACKAGE` updates one package).
+Local workspace notes and checkouts belong in the gitignored `.context/`
+directory and are excluded from release artifacts. The project is MIT licensed.
+
 ## What an adapter is
 
 An adapter delivers a session verdict through a framework's own retry channel.
@@ -32,7 +48,7 @@ every framework. The two shipped adapters are the reference:
 - **Side effects run after validation, before commit.** That is exactly the
   ordering `session.guarded()` gives you — use it for anything with effects.
 - **Import the framework SDK lazily**, inside the function, and raise an
-  `ImportError` that names the extra: `pip install 'lore[<framework>]'`.
+  `ImportError` that names the extra: `pip install 'agent-lore[<framework>]'`.
   If the adapter only produces plain dicts and tuples, don't import the SDK
   at all (the Anthropic adapter does this).
 - **Stay under ~50 lines.** If you need more, the missing piece belongs in
@@ -58,7 +74,7 @@ def validate_output(session: Session, output: Entity | Sequence[Entity]):
         from acme import RetryError
     except ImportError as exc:
         raise ImportError(
-            "the acme adapter needs acme installed: pip install 'lore[acme]'"
+            "the acme adapter needs acme installed: pip install 'agent-lore[acme]'"
         ) from exc
 
     verdict = session.try_commit(*as_entities(output))
@@ -88,7 +104,7 @@ ships it and Python never needs node. After changing anything under
 
 ```bash
 cd ui
-npm install        # first time only
+npm ci             # install the versions in package-lock.json
 npm run build      # type-checks, builds, and syncs src/lore/viz/assets/
 ```
 

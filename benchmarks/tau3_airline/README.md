@@ -12,19 +12,26 @@ See [RESULTS.md](RESULTS.md) for scores, observed repairs, and limitations.
 
 ## Setup and offline tests
 
-Use Python 3.12. The benchmark requires a local tau2-bench v1.0.1 checkout at
-`.context/tau2-bench`; tau2 requires Python below 3.14. Run these commands from
-the repository root after placing the checkout there:
+The world tests need only the library. The harness tests additionally need
+Python 3.12 or 3.13 and a local tau2-bench v1.0.1 checkout at
+`.context/tau2-bench` (tau2 requires Python below 3.14); the checkout is
+separate so benchmark dependencies stay out of the library's lockfile. From
+the repository root:
 
 ```bash
-python3.12 -m venv .venv
-.venv/bin/pip install -e . -e .context/tau2-bench
-.venv/bin/python benchmarks/tau3_airline/test_world.py
-.venv/bin/python benchmarks/tau3_airline/harness/test_harness.py
+git clone https://github.com/sierra-research/tau2-bench.git .context/tau2-bench
+git -C .context/tau2-bench checkout a2c024725189473d2d7cea3a5cfdbcc67478e41f
+uv run --locked pytest -q benchmarks/tau3_airline/test_world.py
+uv run --python 3.12 --locked --with-editable .context/tau2-bench pytest -q benchmarks/tau3_airline/harness/test_harness.py
 ```
 
-The 30 world tests and nine harness tests run without an LLM or API key.
+The 31 world tests and 14 harness tests run without an LLM or API key.
 They cover policy violations, allowed actions, and replay behavior.
+
+Known failing control: `test_upgrade_to_business_enables_cancellation`.
+The differential rule recheck retroactively invalidates the earlier cabin
+upgrade when cancellation is proposed. This is a rule-semantics issue in
+`no_action_on_cancelled`, tracked separately from the harness.
 
 ## How the harness works
 
@@ -34,6 +41,12 @@ The `airline_lore` domain wraps the stock airline environment:
 2. Check the proposal against the session.
 3. If rejected, return a repair prompt as an `error=True` tool result.
 4. If allowed, execute the tool and commit the proposal.
+
+The guard fails closed: a tool call that cannot be mapped to lore entities is
+rejected before it executes. After a tool has executed, any failure to record
+the action (including booking remapping and certificate synchronization)
+raises `LoreConsistencyError` and aborts the run rather than continuing with
+a stale policy graph — the external effect is not rolled back.
 
 A successful `get_user_details` call records authentication. Each task's seed
 includes the conversation, a fixed clock (`2024-05-15T15:00:00`), customer and

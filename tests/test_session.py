@@ -372,3 +372,63 @@ def test_dump_shows_every_many_edge():
     session = many_guard.session(seed=[Tag(id="t1"), Tag(id="t2")])
     assert session.try_commit(Doc(id="d1", tags=["t1", "t2"])).ok
     assert "d1: Doc  tags → t1  tags → t2" in session.dump()
+
+
+# --- explicit None retractions -------------------------------------------------
+# Grounding drops None fields, so an explicit None can never change the graph.
+# When the field already has a committed value that silence is dangerous: the
+# writer believes the value was cleared while lore keeps enforcing the old one.
+
+
+def test_explicit_none_on_committed_relation_is_rejected():
+    session = guard.session(seed=[Target(id="t1")])
+    session.try_commit(Item(id="i1", name="widget", linked="t1"))
+    verdict = session.propose(Item(id="i1", name="widget", linked=None))
+    assert not verdict.ok
+    (violation,) = verdict.rejects
+    assert violation.check == "retraction"
+    assert "linked=None" in violation.message
+    assert "t1" in violation.message
+    assert "append-only" in violation.message
+
+
+def test_explicit_none_on_committed_attribute_is_rejected():
+    lore2 = Lore("retraction-attr-test")
+
+    @lore2.entity
+    class Doc(Entity):
+        state: str | None = None
+
+    session = lore2.compile().session()
+    session.try_commit(Doc(id="d1", state="draft"))
+    verdict = session.propose(Doc(id="d1", state=None))
+    assert not verdict.ok
+    assert [v.check for v in verdict.rejects] == ["retraction"]
+    assert "'draft'" in verdict.rejects[0].message
+
+
+def test_explicit_none_without_committed_value_stays_a_no_op():
+    # Indistinguishable from "no statement": normal for partial objects.
+    session = guard.session(seed=[Target(id="t1")])
+    verdict = session.propose(Item(id="i1", name="widget", linked=None))
+    assert verdict.ok
+    session.commit()
+
+
+def test_defaulted_none_never_counts_as_retraction():
+    session = guard.session(seed=[Target(id="t1")])
+    session.try_commit(Item(id="i1", name="widget", linked="t1"))
+    # linked not passed at all: defaults to None but is not in model_fields_set.
+    verdict = session.propose(Item(id="i1", name="widget"))
+    assert verdict.ok
+
+
+def test_guarded_blocks_side_effects_for_explicit_none_retraction():
+    session = guard.session(seed=[Target(id="t1")])
+    session.try_commit(Item(id="i1", name="widget", linked="t1"))
+    effects = []
+    with pytest.raises(LoreViolation) as exc_info:
+        with session.guarded(Item(id="i1", name="widget", linked=None)):
+            effects.append("ran")
+    assert effects == []
+    assert "cannot be cleared" in exc_info.value.repair_prompt

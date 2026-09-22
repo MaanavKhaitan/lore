@@ -293,7 +293,7 @@ def _reservation_of(action: AgentAction, graph: Graph) -> "Reservation | None":
     for field in ("cancels", "updates"):
         rid = getattr(action, field, None)
         if rid is not None:
-            return graph.get(rid)
+            return graph.get(rid, Reservation)
     return None
 
 
@@ -396,8 +396,8 @@ def cancel_requires_no_flown_segment(c: Cancellation, graph: Graph) -> bool:
     "airline. Deny the request."
 )
 def cancel_eligibility(c: Cancellation, graph: Graph) -> bool:
-    r = graph.get(c.cancels)
-    clock = graph.get(CLOCK_ID)
+    r = graph.get(c.cancels, Reservation)
+    clock = graph.get(CLOCK_ID, Clock)
     if r is None or clock is None:
         return True
     if _effective_cabin(r, graph, exclude_id=c.id) == "business" or r.insurance == "yes":
@@ -438,7 +438,7 @@ def cabin_change_requires_unflown(a: AgentAction, graph: Graph) -> bool:
         new_cabin, rid = a.cabin, a.updates
     else:
         return True
-    r = graph.get(rid)
+    r = graph.get(rid, Reservation)
     if r is None or new_cabin == _effective_cabin(r, graph, exclude_id=a.id):
         return True
     return not _any_flown(rid, graph)
@@ -449,7 +449,7 @@ def cabin_change_requires_unflown(a: AgentAction, graph: Graph) -> bool:
     "bags can be added but not removed."
 )
 def baggage_never_removed(b: BaggageUpdate, graph: Graph) -> bool:
-    r = graph.get(b.updates)
+    r = graph.get(b.updates, Reservation)
     if r is None:
         return True
     current = r.total_baggages
@@ -466,10 +466,10 @@ def baggage_never_removed(b: BaggageUpdate, graph: Graph) -> bool:
     "nonfree_baggages must be at least total minus the free allowance."
 )
 def baggage_allowance_respected(b: BaggageUpdate, graph: Graph) -> bool:
-    r = graph.get(b.updates)
+    r = graph.get(b.updates, Reservation)
     if r is None:
         return True
-    owner = graph.get(r.owned_by)
+    owner = graph.get(r.owned_by, Customer)
     if owner is None:
         return True
     cabin = _effective_cabin(r, graph, exclude_id=b.id)
@@ -482,7 +482,7 @@ def baggage_allowance_respected(b: BaggageUpdate, graph: Graph) -> bool:
     "which cannot be modified — not even by a human agent."
 )
 def passenger_count_is_fixed(p: PassengerUpdate, graph: Graph) -> bool:
-    r = graph.get(p.updates)
+    r = graph.get(p.updates, Reservation)
     return r is None or p.count == r.num_passengers
 
 
@@ -497,7 +497,7 @@ def payment_owned_by_reservation_owner(a: AgentAction, graph: Graph) -> bool:
     pm_id = getattr(a, "payment", None)
     if pm_id is None:
         return True
-    pm = graph.get(pm_id)
+    pm = graph.get(pm_id, PaymentMethod)
     return pm is None or pm.owned_by == reservation.owned_by
 
 
@@ -506,8 +506,8 @@ def payment_owned_by_reservation_owner(a: AgentAction, graph: Graph) -> bool:
     "customer who owns the reservation."
 )
 def booking_payment_owned(u: PaymentUse, graph: Graph) -> bool:
-    r = graph.get(u.pays_for)
-    pm = graph.get(u.method)
+    r = graph.get(u.pays_for, Reservation)
+    pm = graph.get(u.method, PaymentMethod)
     if r is None or pm is None:
         return True
     return pm.owned_by == r.owned_by
@@ -520,7 +520,7 @@ def booking_payment_owned(u: PaymentUse, graph: Graph) -> bool:
     "compensation."
 )
 def compensation_eligibility(g: CertificateGrant, graph: Graph) -> bool:
-    customer = graph.get(g.to_customer)
+    customer = graph.get(g.to_customer, Customer)
     if customer is None:
         return True
     reservations = [r for r in _reservations_of_customer(customer.id, graph)
@@ -545,7 +545,7 @@ def compensation_eligibility(g: CertificateGrant, graph: Graph) -> bool:
 )
 def delayed_compensation_requires_rebooking(g: CertificateGrant,
                                             graph: Graph) -> bool:
-    customer = graph.get(g.to_customer)
+    customer = graph.get(g.to_customer, Customer)
     if customer is None:
         return True
     reservations = [r for r in _reservations_of_customer(customer.id, graph)
@@ -569,7 +569,7 @@ def delayed_compensation_requires_rebooking(g: CertificateGrant,
     severity="flag",
 )
 def compensation_amount_on_schedule(g: CertificateGrant, graph: Graph) -> bool:
-    customer = graph.get(g.to_customer)
+    customer = graph.get(g.to_customer, Customer)
     if customer is None:
         return True
     valid_amounts = set()

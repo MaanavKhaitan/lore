@@ -13,18 +13,17 @@ graph to a JSON blob and ``restore()`` rehydrates it, so stateless deployments
 
 from __future__ import annotations
 
-import json
 from contextlib import contextmanager
 from dataclasses import replace
 from typing import Any, Iterable, Iterator, Protocol
 
-from pydantic import TypeAdapter
-
 from .compile import Guard
-from .engine import Graph, _most_specific, ground, run_checks, run_goals
+from .engine import _safe, explicit_nones, ground, run_checks, run_goals
+from .graph import Graph, _most_specific
 from .infer import build_context, derive
 from .schema import Entity, LoreError
-from .store import AttrFact, EdgeFact, Fact, FactStore, InMemoryStore, LayeredView, TypeFact
+from .snapshot import decode_snapshot, encode_snapshot
+from .store import AttrFact, Fact, FactStore, InMemoryStore, LayeredView, TypeFact
 from .verdict import LoreViolation, Verdict, Violation
 
 __all__ = ["Session", "SessionRecorder", "Verdict", "Violation"]
@@ -77,12 +76,17 @@ class Session:
         if self._recorder is not None and not self._recording_paused:
             self._recorder.on_event(kind, self, **data)
 
+    def _validate_world(self) -> Verdict:
+        """Run the full derive+check pass with every committed fact treated as
+        staged — the whole-world consistency check behind seed validation and
+        snapshot revalidation."""
+        facts = list(self._committed.all_facts())
+        return Verdict(run_checks(build_context(self._guard, self._committed, facts)))
+
     def _validate_seed(self) -> None:
-        """Run the full derive+check pass with every seed fact treated as
-        staged; an inconsistent seed fails loudly instead of silently exempting
+        """An inconsistent seed fails loudly instead of silently exempting
         itself from the lore forever."""
-        seed_facts = list(self._committed.all_facts())
-        verdict = Verdict(run_checks(build_context(self._guard, self._committed, seed_facts)))
+        verdict = self._validate_world()
         if verdict.rejects:
             lines = [
                 f"invalid seed: {len(verdict.rejects)} reject-severity violation(s) "
@@ -98,6 +102,7 @@ class Session:
         implicit rollback, which is exactly right for agent retry loops.
         """
         staged: list[Fact] = []
+        retractions: list[Violation] = []
         for obj in objs:
             for fact in ground(self._guard, obj, "asserted"):
                 # Re-asserting an already-committed fact adds no information:
@@ -105,6 +110,7 @@ class Session:
                 # against purely pre-existing state.
                 if not self._already_committed(fact) and fact not in staged:
                     staged.append(fact)
+            retractions.extend(self._retraction_violations(obj))
         staged_store = InMemoryStore()
         staged_store.add(staged)
         view = LayeredView(self._committed, staged_store)
@@ -113,6 +119,7 @@ class Session:
         # (_staged, _staged_store, _last_verdict) stays complete.
         verdict = Verdict(
             run_checks(build_context(self._guard, view, staged, base=self._committed))
+            + retractions
         )
         # The implicit rollback is emitted only here, where the prior staged
         # facts are actually discarded — never before grounding/checks, which
@@ -271,67 +278,63 @@ class Session:
         turn boundaries: persisting a pending proposal is almost certainly a
         bug, so snapshotting with staged facts raises — commit or roll back
         first. The blob is stamped with ``guard.fingerprint``; restoring
-        under a lore that has since changed fails loudly.
+        under a changed declarative schema fails loudly. Python rule/goal
+        bodies are not fingerprinted; restore reruns them only with
+        ``revalidate=True``.
         """
         if self._staged is not None:
             raise LoreError(
                 "cannot snapshot with a pending proposal: commit() or rollback() first"
             )
-        adapters: dict[str, TypeAdapter[Any]] = {}
-        payload = {
-            "format": _SNAPSHOT_FORMAT,
-            "lore": self._guard.name,
-            "fingerprint": self._guard.fingerprint,
-            "facts": [
-                encode_fact(self._guard, fact, adapters)
-                for fact in self._committed.all_facts()
-            ],
-        }
+        blob = encode_snapshot(self._guard, self._committed.all_facts())
         self._emit("snapshot")
-        return json.dumps(payload, separators=(",", ":"))
+        return blob
 
     @classmethod
     def restore(
-        cls, guard: Guard, blob: str | bytes, *, recorder: SessionRecorder | None = None
+        cls,
+        guard: Guard,
+        blob: str | bytes,
+        *,
+        revalidate: bool = False,
+        recorder: SessionRecorder | None = None,
     ) -> "Session":
         """Rehydrate a session from a :meth:`snapshot` blob.
 
-        The restored facts are trusted as-is (they passed checks when they
-        were committed) — nothing is re-validated, so anything the blob's
-        session was allowed to hold (e.g. a ``validate_seed=False``
+        By default the restored facts are trusted as-is (they passed checks
+        when they were committed) — nothing is re-validated, so anything the
+        blob's session was allowed to hold (e.g. a ``validate_seed=False``
         inconsistency, such as an id typed under two incomparable classes
         whose unpicked branch's rules are skipped) carries over silently.
+        The fingerprint covers the declarative schema and rule/goal metadata
+        but not Python rule bodies, so pass ``revalidate=True`` to re-run
+        every check over the restored world and fail loudly if it no longer
+        satisfies the *current* rules — the safety net for edited rule logic,
+        at the cost of one full check pass.
+
         Raises :class:`~lore.schema.LoreError` if the blob is not a snapshot,
-        uses an unknown snapshot format, or was taken under a lore whose
-        fingerprint differs from ``guard.fingerprint``.
+        uses an unknown snapshot format, was taken under a lore whose
+        fingerprint differs from ``guard.fingerprint``, or (with
+        ``revalidate=True``) draws reject-severity violations under the
+        current rules.
         """
-        try:
-            data = json.loads(blob)
-        except (ValueError, TypeError, UnicodeDecodeError) as exc:
-            raise LoreError(f"not a lore session snapshot: {exc}") from exc
-        if not isinstance(data, dict) or not isinstance(data.get("facts"), list):
-            raise LoreError("not a lore session snapshot (no fact list)")
-        if data.get("format") != _SNAPSHOT_FORMAT:
-            raise LoreError(
-                f"unsupported snapshot format {data.get('format')!r} "
-                f"(this lore version reads format {_SNAPSHOT_FORMAT})"
-            )
-        if data.get("fingerprint") != guard.fingerprint:
-            raise LoreError(
-                f"snapshot was taken under lore {data.get('lore')!r} with fingerprint "
-                f"{data.get('fingerprint')!r}, but restoring under {guard.name!r} with "
-                f"{guard.fingerprint!r} — the lore has changed since this snapshot was "
-                "taken; restore with the original definition or start a fresh session"
-            )
+        facts = decode_snapshot(guard, blob)
         # Construct with the recorder detached: a restore is not a fresh
         # session start, so it reports one "restore" event instead.
         session = cls(guard)
-        adapters: dict[str, TypeAdapter[Any]] = {}
-        facts = [_decode_fact(guard, raw, adapters) for raw in data["facts"]]
         session._committed.add(facts)
         # Resume the commit-step counter where the snapshot left off, so
         # post-restore commits keep numbering (and messages) correct.
         session._step = max((f.step for f in facts), default=0)
+        if revalidate:
+            verdict = session._validate_world()
+            if verdict.rejects:
+                lines = [
+                    f"snapshot is invalid under the current rules: "
+                    f"{len(verdict.rejects)} reject-severity violation(s):"
+                ]
+                lines += [f"  - {v.message}" for v in verdict.rejects]
+                raise LoreError("\n".join(lines))
         session._recorder = recorder
         session._emit("restore", facts=session._committed.all_facts())
         return session
@@ -442,6 +445,51 @@ class Session:
         self._staged_store = InMemoryStore()
         self._last_verdict = None
 
+    def _retraction_violations(self, obj: Entity) -> list[Violation]:
+        """Reject an explicit ``None`` on a field with a committed value.
+
+        Grounding drops ``None`` fields, so such a proposal would otherwise be
+        a silent no-op: the writer believes the value was cleared while lore
+        keeps enforcing the old one — in a ``guarded()`` tool that permits an
+        external clearing side effect the graph never records. Facts are
+        append-only; state transitions must be modeled as new facts (e.g. a
+        status value or a superseding entity), never as retractions. A ``None``
+        on a field with no committed value stays a no-op: it is
+        indistinguishable from "no statement" and normal for partial objects.
+        """
+        out = []
+        for field_name, predicate, is_relation in explicit_nones(self._guard, obj):
+            if is_relation:
+                # ids render like every other message; attribute values render
+                # with repr like the single_value/one_of listings do.
+                values = ", ".join(
+                    _safe(e.object_id)
+                    for e in self._committed.edges_from(obj.id, predicate)
+                )
+            else:
+                values = ", ".join(
+                    repr(f.value)
+                    for f in self._committed.attrs(predicate)
+                    if f.subject_id == obj.id
+                )
+            if not values:
+                continue
+            out.append(
+                Violation(
+                    check="retraction",
+                    severity="reject",
+                    message=(
+                        f"{_safe(obj.id)} sets {field_name}=None, but {predicate} "
+                        f"already holds {values} — facts are append-only, so a "
+                        "committed value cannot be cleared. Model the change as a "
+                        "new fact (e.g. a status value or a superseding entity) "
+                        "instead."
+                    ),
+                    subjects=(obj.id,),
+                )
+            )
+        return out
+
     def _already_committed(self, fact: Fact) -> bool:
         """Content-level membership in the committed store (ignores ``source``)."""
         if isinstance(fact, TypeFact):
@@ -455,92 +503,3 @@ class Session:
             e.object_id == fact.object_id
             for e in self._committed.edges_from(fact.subject_id, fact.predicate)
         )
-
-
-# --- snapshot codec -----------------------------------------------------------
-# Attribute values round-trip through the owning field's Pydantic annotation
-# (datetime, Decimal, enums, ... come back as ``==``-equal values of the types
-# the rules saw before the snapshot, though pydantic may canonicalize e.g.
-# tzinfo implementations); a value the annotation cannot serialize or
-# re-validate raises instead of degrading silently. Ids/sources are plain str.
-
-_SNAPSHOT_FORMAT = 1
-_SOURCES = ("seed", "asserted")
-
-
-def _attr_adapter(guard: Guard, attr: str, adapters: dict[str, TypeAdapter[Any]]) -> TypeAdapter[Any]:
-    adapter = adapters.get(attr)
-    if adapter is None:
-        spec = guard.attributes.get(attr)
-        if spec is None:
-            raise LoreError(
-                f"snapshot refers to attribute {attr!r}, which is not in lore {guard.name!r}"
-            )
-        annotation = guard.classes[spec.owner].cls.model_fields[spec.field].annotation
-        adapter = adapters[attr] = TypeAdapter(annotation)
-    return adapter
-
-
-def encode_fact(guard: Guard, fact: Fact, adapters: dict[str, TypeAdapter[Any]]) -> dict[str, Any]:
-    """Encode one fact as the snapshot codec's JSON dict (shared with lore.viz)."""
-    if isinstance(fact, TypeFact):
-        return {"kind": "type", "node": fact.node_id, "class": fact.type_name, "source": fact.source,
-                "step": fact.step}
-    if isinstance(fact, EdgeFact):
-        return {
-            "kind": "edge",
-            "subject": fact.subject_id,
-            "predicate": fact.predicate,
-            "object": fact.object_id,
-            "source": fact.source,
-            "step": fact.step,
-        }
-    try:
-        value = _attr_adapter(guard, fact.attr, adapters).dump_python(
-            fact.value, mode="json", warnings="error"
-        )
-    except LoreError:
-        raise
-    except Exception as exc:
-        raise LoreError(
-            f"cannot snapshot {fact.attr}={fact.value!r}: the value does not serialize "
-            f"through the field's annotation ({exc})"
-        ) from exc
-    return {"kind": "attr", "subject": fact.subject_id, "attr": fact.attr, "value": value,
-            "source": fact.source, "step": fact.step}
-
-
-def _decode_fact(guard: Guard, raw: Any, adapters: dict[str, TypeAdapter[Any]]) -> Fact:
-    try:
-        kind, source = raw["kind"], raw["source"]
-        if source not in _SOURCES:
-            raise LoreError(f"malformed snapshot fact (bad source): {raw!r}")
-        step = raw.get("step", 0)
-        if not isinstance(step, int) or isinstance(step, bool) or step < 0:
-            raise LoreError(f"malformed snapshot fact (bad step): {raw!r}")
-        if kind == "type":
-            if raw["class"] not in guard.classes:
-                raise LoreError(
-                    f"snapshot types {raw['node']!r} as {raw['class']!r}, which is not "
-                    f"a class in lore {guard.name!r}"
-                )
-            return TypeFact(raw["node"], raw["class"], source, step=step)
-        if kind == "edge":
-            if raw["predicate"] not in guard.relations:
-                raise LoreError(
-                    f"snapshot refers to relation {raw['predicate']!r}, which is not "
-                    f"in lore {guard.name!r}"
-                )
-            return EdgeFact(raw["subject"], raw["predicate"], raw["object"], source, step=step)
-        if kind == "attr":
-            adapter = _attr_adapter(guard, raw["attr"], adapters)
-            try:
-                value = adapter.validate_python(raw["value"])
-            except Exception as exc:
-                raise LoreError(
-                    f"cannot restore {raw['attr']}={raw['value']!r} from a snapshot: {exc}"
-                ) from exc
-            return AttrFact(raw["subject"], raw["attr"], value, source, step=step)
-    except (KeyError, TypeError) as exc:
-        raise LoreError(f"malformed snapshot fact: {raw!r}") from exc
-    raise LoreError(f"malformed snapshot fact (unknown kind): {raw!r}")

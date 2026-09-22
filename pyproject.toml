@@ -8,6 +8,8 @@ name = "agent-lore"
 version = "0.1.0"
 description = "Deterministic guardrails for agent outputs — Pydantic validates the shape of one object; lore validates whether your agent's outputs make sense in your world."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 authors = [{ name = "Maanav Khaitan", email = "maanav@infiniteworlds.xyz" }]
 dependencies = ["pydantic>=2.7"]
@@ -21,6 +23,10 @@ dev = ["pytest>=8", "hypothesis>=6", "pydantic-ai>=0.2"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/lore"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/src", "/tests", "/examples", "/benchmarks", "/ui", "/docs", "/README.md", "/CONTEXT.md", "/CONTRIBUTING.md", "/LICENSE", "/pyproject.toml", "/uv.lock"]
+exclude = ["**/__pycache__", "**/node_modules", "**/dist"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

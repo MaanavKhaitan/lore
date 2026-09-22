@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, TypeVar, overload
 
+from .schema import Entity
 from .store import EdgeFact, FactStore
 
 if TYPE_CHECKING:
     from .compile import CompiledClass, Guard
-    from .schema import Entity
+
+EntityT = TypeVar("EntityT", bound=Entity)
 
 
 def _most_specific(guard: "Guard", type_names: set[str]) -> "CompiledClass | None":
@@ -48,13 +50,24 @@ class Graph:
         self._mirrors = mirrors
         self._closure = closure
 
-    def get(self, node_id: str) -> "Entity | None":
+    @overload
+    def get(self, node_id: str) -> Entity | None: ...
+
+    @overload
+    def get(self, node_id: str, expected_type: type[EntityT]) -> EntityT | None: ...
+
+    def get(self, node_id: str, expected_type: type[Entity] = Entity) -> Entity | None:
         """Rehydrate an entity from its asserted facts (``None`` if the node
-        doesn't exist)."""
+        doesn't exist or is not an instance of ``expected_type``).
+
+        Rules that follow relations should pass the expected target class
+        and handle ``None``: proposals can contain missing or wrongly typed
+        targets, which the existence/range checks report separately.
+        """
         compiled = _most_specific(self._guard, self._view.types_of(node_id))
-        if compiled is None:
+        if compiled is None or not issubclass(compiled.cls, expected_type):
             return None
-        kwargs: dict[str, object] = {"id": node_id}
+        kwargs: dict[str, Any] = {"id": node_id}
         for field_name, rel in compiled.relations.items():
             edges = self._view.edges_from(node_id, rel.predicate)
             if rel.many:
