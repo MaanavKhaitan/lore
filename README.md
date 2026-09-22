@@ -1,399 +1,224 @@
 # lore
 
-**Pydantic validates the shape of one object. lore validates whether your
-agent's outputs make sense in your world.**
+**Check agent actions against rules that span objects and turns.**
 
-Declare what's true in your world — entity classes, relations, and
-axioms — on Pydantic models you already have. Agent outputs and tool calls are
-**deterministically** checked against it: cross-object, cross-turn, stateful
-constraints that per-object schema validation structurally cannot express.
-Violations render as natural-language repair prompts fed back to the agent.
+Pydantic checks individual objects. lore adds checks against the state of an
+agent's run: whether an order was already refunded, a payment recipient exists,
+or an approver is in the employee's management chain.
 
-```
-"an order can be refunded at most once"
-"a payout recipient can never be a support-rep account"
-"a refund cannot exceed the order's total"
-```
+Define entities and rules in Python. lore checks each proposal before you apply
+it and returns a plain-English explanation when it fails. Your agent can use
+that explanation to retry or explain why the request cannot be completed.
 
-No RDF, no reasoner JVM, no graph database. Runtime dependency: pydantic.
-*(Not on PyPI yet — will ship as `agent-lore`, imported as `lore`.)*
+The core requires Python 3.11+ and Pydantic. It does not need an LLM, graph
+database, or separate reasoning service.
 
 ## Install
 
+From a local checkout:
+
 ```bash
-pip install -e .                  # core
-pip install -e ".[pydantic-ai]"   # + the Pydantic AI adapter
-pip install -e ".[anthropic]"     # + the live-agent example (Anthropic SDK)
+pip install -e .
 ```
 
-## Declare your world
+Optional integrations:
+
+```bash
+pip install -e ".[pydantic-ai]"
+pip install -e ".[anthropic]"
+```
+
+The package name is `agent-lore`; the Python import is `lore`.
+
+## Example: prevent a second refund
+
+Relations refer to entities by ID. Here, `max_per_target=1` means each order can
+have at most one refund, even when the refunds are proposed on different turns.
 
 ```python
-from lore import Entity, Graph, Lore, Relation, one_of, relation
+from lore import Entity, Lore, Relation, relation
 
 lore = Lore("commerce")
 
-@lore.entity
-class Customer(Entity):
-    name: str
-
-@lore.entity
-class SupportRep(Entity):
-    lore_disjoint_with = [Customer]   # never both, same id
-    name: str
 
 @lore.entity
 class Order(Entity):
-    status: str = one_of("paid", "shipped", "refunded")
     total: float
-    placed_by: Relation[Customer]      # relations reference targets by id
+
 
 @lore.entity
 class Refund(Entity):
     amount: float
-    refunds: Relation[Order] = relation(max_per_target=1)  # refund-once
-    paid_to: Relation[Customer]
+    refunds: Relation[Order] = relation(max_per_target=1)
 
-@lore.rule(message="Refund {obj.id} of ${obj.amount} exceeds the total of order {obj.refunds}.")
-def refund_within_order_total(refund: Refund, graph: Graph) -> bool:
-    order = graph.get(refund.refunds)          # arbitrary-Python escape hatch
-    return order is None or refund.amount <= order.total
 
-guard = lore.compile()   # broken lore fails loudly here, Pydantic-style
+guard = lore.compile()
+session = guard.session(seed=[Order(id="order_1", total=100.0)])
+
+first = session.try_commit(
+    Refund(id="refund_1", amount=40.0, refunds="order_1")
+)
+assert first.ok
+
+second = session.try_commit(
+    Refund(id="refund_2", amount=40.0, refunds="order_1")
+)
+assert not second.ok
+print(second.repair_prompt())
 ```
 
-A list target declares a multi-valued relation — `uses_terms:
-Relation[list[DefinedTerm]] = relation(default=[])` grounds one edge per id,
-checked per element. Facts are append-only, so the list accretes like a set:
-re-proposing an id with a grown list adds the new references, never removes
-any, and rules always receive the full list (`[]` when it has no edges).
+The second refund is a valid Pydantic object, but it breaks the rule for this
+order. The repair prompt identifies the order and both refunds. The rejected
+refund is not added to the session.
 
-## Catch the double refund
-
-```python
-session = guard.session(seed=[ada, sam, ord_1, ord_2, prior_refund])
-
-session.propose(Refund(id="ref_1", amount=40.0, refunds="ord_2", paid_to="cust_1"))
-session.commit()   # ok — committed
-
-verdict = session.propose(Refund(id="ref_2", amount=40.0, refunds="ord_2", paid_to="cust_1"))
-verdict.ok         # False
-print(verdict.repair_prompt())
-```
-
-```
-Your output violates 1 rule(s) of this domain:
-  1. An Order can have at most 1 Refund pointing at it via 'refunds', but ord_2
-     has 2: ref_1 (already committed), ref_2 (proposed).
-Produce a corrected output that satisfies every rule. If the requested action
-is impossible under these rules, say so instead of retrying it.
-```
-
-Note what happened: the second refund was a perfectly valid `Refund` object.
-Pydantic has nothing to complain about — the violation only exists across
-objects and across turns. A refund paid to the support rep (`range`), a refund
-of a nonexistent order (`existence`), one id typed as both customer and rep
-(`disjoint`), a bad status (`one_of`) are all caught the same way. Run
-`python examples/commerce/demo.py` to see each verdict — no API key needed.
-
-## Relation characteristics — inference with receipts
-
-Declare *how a relation behaves* and violations are caught across chains
-nobody enumerated:
-
-```python
-lore = Lore("hr")
-
-@lore.entity
-class Employee(Entity):
-    name: str
-    reports_to: Relation["Employee"] | None = relation(
-        transitive=True,     # A→B and B→C imply A→C
-        irreflexive=True,    # nobody is in their own chain
-        default=None,
-    )
-```
-
-That one declaration is cycle detection: a proposed edge that closes a
-reporting loop derives a self-edge, the irreflexive check catches it, and
-the repair prompt renders the exact chain — every derived fact carries
-provenance, the base facts that produced it:
-
-```
-Your output violates 1 rule(s) of this domain:
-  1. emp_9 cannot reach itself via 'reports_to', but this proposal creates a
-     cycle: emp_9 → mgr_2 (already committed at step 2) → ceo (already
-     committed at step 1) → emp_9 (proposed).
-```
-
-The other characteristics: `symmetric=True` mirrors each edge onto its own
-predicate, so "B married to both A and C" is caught even when every fact was
-asserted from the other side; `inverse_of="field"` pairs two fields as two
-directions of one fact, so cardinality holds whichever direction the agent
-asserts (a one-to-one pair wants `max_per_target=1` on one side);
-`asymmetric=True` rejects B→A once A→B holds, and implies `irreflexive`.
-
-Derived edges are checked, never committed, and never leak into entity
-rehydration — rules traverse them explicitly with `graph.reachable()`:
-
-```python
-@lore.rule(message="Expense {obj.id} was approved by {obj.approved_by}, "
-                   "who is not in {obj.filed_by}'s management chain.")
-def approver_in_chain(report: ExpenseReport, graph: Graph) -> bool:
-    return report.approved_by in graph.reachable(report.filed_by, "Employee.reports_to")
-```
-
-The CEO approving a deep report passes without anyone enumerating chains, and
-self-approval fails naturally — irreflexivity keeps you out of your own
-chain. Run `python examples/hr/demo.py` to see all four verdicts:
-self-manage, cycle, and out-of-chain approvals rejected; a transitively-valid
-CEO approval committed.
-
-`python examples/accounting/demo.py` (no API key) runs the flagship
-production-shaped example: aggregate rules, flags, a one-to-one inverse pair,
-and a session that survives process boundaries.
-
-## Guard a tool call
-
-`propose`/`commit`/`rollback` is the transactional core; three wrappers cover
-the everyday shapes, and `check_goals` covers the output boundary:
-
-```python
-verdict = session.check(refund)        # preflight "can I?" — zero state change
-verdict = session.try_commit(refund)   # commit if ok, roll back otherwise
-verdict = session.check_goals()        # output boundary "am I done?" (see goals below)
-
-with session.guarded(refund):          # raises LoreViolation on rejects
-    ledger.append(entry)               # side effects run only if valid;
-                                       # commit happens after they succeed
-```
-
-`guarded()` gets the ordering right by construction: an invalid proposal
-raises *before* the body runs (no side effects), an exception in the body
-rolls the proposal back (no commit for failed effects), and a clean exit
-commits. `LoreViolation` carries the verdict, and `str(exc)` is the
-repair prompt — catch it and feed it back to the model.
-
-To see what the session believes while debugging: `print(session.dump())`
-renders the world grouped by entity (committed vs staged, seeds marked), and
-`session.graph` exposes the same read API rules receive
-(`graph.get(id)`, `graph.incoming(id, "Refund.refunds")`).
-
-## Persist the session between turns
-
-Real deployments are stateless: each agent turn lands on whichever worker
-picks it up, and an in-process session dies with the process. `snapshot()`
-serializes the committed graph to a compact JSON blob — store it wherever you
-already keep state and rehydrate next turn:
-
-```python
-redis.set(f"lore:{run_id}", session.snapshot())       # end of turn N
-...
-session = guard.restore(redis.get(f"lore:{run_id}"))  # start of turn N+1
-```
-
-Restore reproduces the committed graph exactly — facts, order, seed
-markings — so cross-turn rules like refund-once keep firing across processes.
-Attribute values round-trip through their field annotations (a `datetime`
-comes back a `datetime`). The blob is stamped with `guard.fingerprint`, a
-content-hash of the lore's validation semantics: restoring under a lore that
-has since changed raises instead of silently validating old facts against new
-rules. Snapshots capture turn boundaries — snapshotting with an uncommitted
-proposal raises too.
-
-## See it: one HTML file, three tabs
-
-`lore.viz` exports a self-contained HTML viewer — no server, no build step,
-open it in a browser or Slack it to a teammate:
-
-```python
-from lore.viz import TraceRecorder, to_html
-
-recorder = TraceRecorder()
-session = guard.session(seed=[...], recorder=recorder)  # observe every transaction
-...
-to_html(guard, trace=recorder, out="run.html")
-```
-
-- **World** — your declarations as a diagram: entity cards, relation arrows
-  with plain-English badges ("at most 1 per target", "no cycles"), and every
-  rule and goal as the same English `to_context()` puts in the prompt.
-- **Timeline** — the flight recorder: every propose/commit/reject in order;
-  expand a rejection to see the exact repair prompt the agent got, plus the
-  violation drawn on the graph — the proposed facts dashed, the offending
-  path in red.
-- **Playback** — the committed world as a graph, with a scrubber that replays
-  it growing step by step.
-
-Production debugging needs no trace: `to_html(guard, snapshot=blob,
-out="state.html")` renders the Playback view straight from a persisted
-`session.snapshot()` blob. There's a CLI too:
+The [commerce example](examples/commerce/world.py) also checks refund amounts,
+recipient types, and missing orders. Run it without an API key:
 
 ```bash
-python -m lore.viz examples/legal/world.py -o world.html          # schema only
-python -m lore.viz myapp.world:guard --snapshot blob.json -o run.html # from redis
-python examples/legal/demo.py --html legal.html               # full demo run
+python examples/commerce/demo.py
 ```
 
-## Put the rules in the prompt too
+## Write rules in Python
+
+Use `@lore.rule` for checks that need to read other entities. Add this rule
+before calling `lore.compile()` in the example above:
 
 ```python
-system_prompt = guard.to_context() + "\n\n" + YOUR_INSTRUCTIONS
+from lore import Graph
+
+
+@lore.rule(message="Refund {obj.id} exceeds the total of order {obj.refunds}.")
+def refund_within_order_total(refund: Refund, graph: Graph) -> bool:
+    order = graph.get(refund.refunds)
+    return order is None or refund.amount <= order.total
 ```
 
-`to_context()` renders the lore as deterministic English — entity shapes,
-disjointness, cardinality, and rules — so the same declaration serves
-prevention (the model knows the rules) and detection (violations are caught
-anyway when it ignores them).
+Missing relation targets are checked separately. Rules can read entities with
+`graph.get()`, find incoming relations with `graph.incoming()`, and follow
+relation chains with `graph.reachable()`.
 
-`python examples/legal/demo.py` (no API key) runs the playbook-enforcement
-example: a drafting agent's negotiation playbook as lore — approved-library
-existence, walk-away vs. escalate severities, immutable defined terms.
-`live_agent.py` next to it drafts a full MSA live, every tool guarded, with
-this rendered playbook as the system prompt (needs ANTHROPIC_API_KEY).
+Some requirements apply only when the agent finishes. Declare those with
+`@lore.goal` and call `session.check_goals()` at the output boundary. For
+example, a completed contract must have a governing-law clause, but a draft
+can be incomplete. See the [legal example](examples/legal/world.py).
 
-## "At most one X" is a rule; "at least one X" is a goal
+## Guard tool calls and outputs
 
-A finished contract must contain a governing-law clause — but that can't be a
-`@lore.rule`: it is only false when the agent claims to be *done*, and checking
-it per proposal would reject every half-drafted world. Declare it as a **goal**
-and check it once, at the output boundary:
+Use `session.guarded()` to validate an action before running its side effects:
 
 ```python
-@lore.goal(message="Contract {obj.id} has no governing-law clause.")
-def has_governing_law(contract: Contract, graph: Graph) -> bool:
-    return len(graph.incoming(contract.id, "GoverningLawClause.governs")) == 1
+from lore import LoreViolation
 
-verdict = session.check_goals()   # zero state change; repair_prompt() on failure
+refund = Refund(id="refund_3", amount=20.0, refunds="order_1")
+ledger = []
+
+try:
+    with session.guarded(refund):
+        ledger.append({"refund_id": refund.id, "amount": refund.amount})
+except LoreViolation as exc:
+    print(str(exc))  # Send this repair prompt back to the agent.
 ```
 
-Goals never run during `propose()`; `to_context()` renders them under
-"Goals — checked when you finish", so prevention and detection stay one
-declaration. `examples/legal/` uses both halves.
+A rejection raises before the body runs. A successful body commits the
+proposal. If the body raises, lore rolls back the proposal; it cannot undo
+external side effects that already happened.
 
-## Close the loop with an agent
+| Method | Use it to |
+|---|---|
+| `session.check(obj)` | Validate without changing session state |
+| `session.try_commit(obj)` | Validate and commit if allowed; roll back otherwise |
+| `session.guarded(obj)` | Validate, run side effects, then commit |
+| `session.propose(obj)` | Stage a proposal for an explicit `commit()` or `rollback()` |
+| `session.check_goals()` | Check completion requirements without changing state |
 
-The repair prompt plugs straight into retry sockets that already exist.
-With Pydantic AI it's three lines:
+Give the agent the same rules in its prompt with `guard.to_context()`.
+
+For Pydantic AI, connect the session to an output validator:
 
 ```python
 from lore.adapters.pydantic_ai import validate_output
 
+
 @agent.output_validator
 def check_against_lore(output: Refund) -> Refund:
-    return validate_output(session, output)   # ok → commit; bad → ModelRetry(repair_prompt)
+    return validate_output(session, output)
 ```
 
-The agent emits the double refund, receives the message above, and corrects
-itself — `python examples/commerce/agent_demo.py` runs the whole
-validate → explain → retry → pass loop offline with a scripted model.
+Valid outputs are committed. Rejections raise `ModelRetry` with the repair
+prompt. The [offline agent demo](examples/commerce/agent_demo.py) shows the
+full retry loop. The [Anthropic live example](examples/commerce/live_agent.py)
+uses `guard_tool` to check tool calls and also validates the final summary.
 
-### Anthropic tool-use loops
+## Other checks
 
-For hand-rolled Messages-API loops, `guard_tool` wraps a tool function so its
-returned entity is proposed before anything takes effect — a rejection becomes
-the `(repair_prompt, is_error=True)` tool result the loop feeds back:
+| Requirement | Declaration |
+|---|---|
+| A relation target must exist and have the right type | `Relation[Customer]` |
+| A field must use an allowed value | `one_of("paid", "shipped", "refunded")` |
+| An ID cannot belong to two incompatible classes | `lore_disjoint_with = [Customer]` |
+| A relation can contain multiple IDs | `Relation[list[Customer]]` |
+| A reporting chain cannot contain cycles | `relation(transitive=True, irreflexive=True)` |
+| A relation works in both directions | `relation(symmetric=True)` |
+| Two fields represent opposite directions of one relation | `relation(inverse_of="field")` |
+| A reverse edge is forbidden | `relation(asymmetric=True)` |
+
+Inferred relations carry the facts that produced them, so a cycle rejection
+can show the full chain. They are used for checks and `graph.reachable()`;
+they are not committed or added to the entities returned by `graph.get()`.
+
+Rules reject by default. Use `severity="flag"` to report a violation while
+still allowing the proposal to commit.
+
+## Save and inspect a session
+
+Save committed state between turns and restore it on another worker:
 
 ```python
-from lore.adapters.anthropic import guard_tool
-
-@guard_tool(session)
-def issue_refund(order_id: str, amount: float, payout_account_id: str):
-    refund = Refund(id=next_id(), amount=amount, refunds=order_id,
-                    paid_to=payout_account_id)
-    entry = {"refund_id": refund.id, "order_id": order_id, "amount": amount}
-
-    def issued():                        # runs only if the guard passes
-        LEDGER.append(entry)
-        return {"status": "issued", **entry}
-
-    return refund, issued
-
-content, is_error = issue_refund(**tool_use.input)   # → tool_result block
+blob = session.snapshot()  # JSON string; store it with your run state.
+session = guard.restore(blob)
 ```
 
-(The adapter never imports the anthropic SDK — it only produces the result
-shapes the loop needs, so it works with any hand-rolled loop.)
+Snapshots preserve facts, commit order, and seed markings. Restore rejects a
+mismatched schema fingerprint. Commit or roll back any pending proposal before
+snapshotting.
 
-`examples/commerce/live_agent.py` runs this against a live Anthropic agent,
-with the guard at both check points of a tool-use loop:
-
-- **before a tool call executes** — each `issue_refund` call is proposed
-  against the session first; a rejection returns the repair prompt as an
-  `is_error` tool result and writes nothing;
-- **on the final output** — the agent's structured summary is re-proposed
-  against the committed ledger, so a summary that violates the lore or
-  claims a refund that was never issued bounces back too.
-
-It builds its system prompt with `to_context()` as shown above, and takes
-`--no-context` to run detection-only.
+Use `session.dump()` for a text view or `session.graph` to inspect entities and
+relations. To export an HTML viewer with declarations, transaction history,
+and state playback, run:
 
 ```bash
-pip install -e ".[anthropic]"
-ANTHROPIC_API_KEY=... python examples/commerce/live_agent.py   # or put the key in a repo-root .env
+python examples/commerce/demo.py --html commerce.html
 ```
 
-The lookup tool plays a deliberately stale orders DB — no refund history, no
-account types — while the session knows both. The model walks into a
-cross-turn double refund and a payout redirected to a support-rep account,
-gets the two repair prompts above, declines the impossible request, and
-self-corrects the other. Costs a few cents per run.
+You can also record your own run with `lore.viz.TraceRecorder` and export it
+with `lore.viz.to_html`. The viewer is a self-contained file; no server is needed.
 
-## How it works
+## Session behavior
 
-1. **Ground** — a proposed entity is mechanically decomposed into facts:
-   type facts (one per class in the MRO, so subclasses satisfy supertype
-   constraints), edge facts for relations, attribute facts for scalars.
-   Deterministic; no LLM anywhere.
-2. **Infer** — mirrors (symmetric and inverse pairs) and transitive closure
-   are derived over committed ∪ staged, each derived edge recording the base
-   facts that produced it. Derived edges are checked, never committed, and
-   recomputed per proposal — a rejected proposal's derivations vanish with it.
-3. **Check** — facts are staged in an overlay, never written directly. All
-   checks (existence, domain/range, max_per_target, single_value, one_of,
-   disjoint, type_coherence, irreflexive, asymmetric, rules) scan the
-   composed views; only violations caused by staged facts (directly or
-   through a derived edge) are reported. Rules re-run on every instance of their target class:
-   failures on the proposal's own neighborhood always report, and every
-   other committed instance is checked differentially — a proposal that
-   would flip a committed node's rule from satisfied to violated is
-   rejected, naming that node. Committed facts are immutable, so the flip
-   would otherwise be unrepairable; this also means rules never need to be
-   monotone, however far they read.
-4. **Verdict** — violations carry severity (`reject` blocks commit, `flag`
-   commits but is surfaced) and render as concrete, id-naming English, with
-   step numbers ("already committed at step 2") and derivation chains.
-5. **Repair** — `verdict.ok` gates `session.commit()`; otherwise
-   `repair_prompt()` goes back to the agent and the rejected facts vanish —
-   a failed attempt leaves **zero trace**, so retries never fire against the
-   agent's own earlier mistakes.
+- A session checks only its seed data and committed facts, plus the current
+  proposal. Seed the records your rules need; missing records count as missing.
+- Seeds are validated by default. Use `validate_seed=False` to opt out.
+- Facts are append-only. Changing a committed scalar value is a violation.
+  List relations can gain IDs but cannot remove them.
+- Use one session per agent run. Sessions are single-threaded.
 
-Sessions are transactional (propose → check → commit), closed-world over
-their seed plus committed facts, and single-threaded by design: one session
-per agent run. Seeds are validated against the lore at session creation
-(`validate_seed=False` to opt out). Committed facts are immutable:
-re-asserting an entity id with changed values is itself a violation
-(`single_value`), never a silent update — so an agent can't dodge "refund at
-most once" by reusing an old refund's id.
+## Examples and results
 
-## Status & roadmap
+| Example | What it covers |
+|---|---|
+| [Commerce](examples/commerce/demo.py) | Refunds, recipient types, and agent retries |
+| [HR](examples/hr/demo.py) | Reporting cycles and approval chains |
+| [Accounting](examples/accounting/demo.py) | Aggregate rules, flags, inverse relations, and persistence |
+| [Legal](examples/legal/demo.py) | Contract rules and completion goals |
+| [Airline benchmark](benchmarks/tau3_airline/README.md) | Policy checks around an agent's write tools |
 
-Milestone 1: schema DSL, grounding, in-memory store, 6 axiom checks + rule
-escape hatch, verdicts/repair prompts, Pydantic AI + Anthropic adapters,
-`check`/`try_commit`/`guarded()` session API, `to_context()` prompt rendering,
-durable sessions (`snapshot()`/`restore()` + lore fingerprint), session
-inspection (`dump()`, `session.graph`), commerce example.
+Each example's `demo.py` runs without an API key. Live examples require
+`ANTHROPIC_API_KEY`.
 
-Milestone 2 (this): the inference layer — relation characteristics
-(`transitive`, `symmetric`, `asymmetric`, `irreflexive`, `inverse_of`) with
-compile-time contradiction checks, provenance-carrying derived facts,
-irreflexive/asymmetric checks (cycle detection with rendered chains), commit
-step numbers in messages, seed validation, `graph.reachable()`, HR
-approval-chain example. Tested table-driven per axiom + Hypothesis properties.
+In the recorded airline benchmark run, Sonnet 4.6 with lore scored **89.0%
+pass¹**, compared with **82.5%** for the published baseline. This is a single-run
+comparison; the full difference cannot be attributed to the guard. See
+[results and limitations](benchmarks/tau3_airline/RESULTS.md).
 
-Next: severity/shadow-mode polish; SHACL export as a differential-testing
-oracle; an MCP tool-call proxy; a benchmark for axiom-violation feedback vs
-generic retry. See `CONTEXT.md` for the full design rationale and research.
-
-Want lore in a framework we don't cover? Adapters are ~30 lines —
-[CONTRIBUTING.md](CONTRIBUTING.md) has the contract and a template.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for adapter guidance and
+[CONTEXT.md](CONTEXT.md) for design notes and research.
