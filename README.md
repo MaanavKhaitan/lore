@@ -83,7 +83,7 @@ baseline settings, adding `lore` checks around the agent's six write tools.
 
 | Setup | pass¹ | pass⁴ | Cost per conversation |
 |---|---:|---:|---:|
-| Stock Sonnet 4.6 (published baseline) | 82.5% | 76.0% | $0.253 |
+| Sonnet 4.6 (published baseline) | 82.5% | 76.0% | $0.253 |
 | Sonnet 4.6 + lore | 89.0% | 82.0% | ~$0.27 |
 
 `lore` blocked six airline policy violations during the run, and the agent recovered and passed in all six cases. One example is a task where we went from 0/4 baseline passes to 4/4, in which airline policy mandates using at most one certificate to pay for a trip but a user requests the agent to use two certificates to pay.
